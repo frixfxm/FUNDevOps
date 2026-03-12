@@ -26,7 +26,8 @@ VALUES
   ('Петр Петрович', 'peta', crypt('petaOWN', gen_salt('bf')), 'https://placehold.co/64x64?text=P'),
   ('Толя', 'tolya', crypt('Tolik0508', gen_salt('bf')), 'https://placehold.co/64x64?text=T'),
   ('Хомяк', 'dima', crypt('DIMASIK1213', gen_salt('bf')), 'https://placehold.co/64x64?text=H'),
-  ('Влад', 'vlad', crypt('vladLadaSedan', gen_salt('bf')), 'https://placehold.co/64x64?text=V');
+  ('Влад', 'vlad', crypt('vladLadaSedan', gen_salt('bf')), 'https://placehold.co/64x64?text=V'),
+  ('Санечка', 'sasha', crypt('sanechkaPASS', gen_salt('bf')), 'https://placehold.co/64x64?text=S');
 
 INSERT INTO messages (sender_id, receiver_id, body)
 VALUES

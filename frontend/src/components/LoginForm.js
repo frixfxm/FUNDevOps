@@ -9,7 +9,8 @@ const demoUsers = [
   { fullName: 'Петр Петрович', login: 'peta', password: 'petaOWN' },
   { fullName: 'Толя', login: 'tolya', password: 'Tolik0508' },
   { fullName: 'Хомяк', login: 'dima', password: 'DIMASIK1213' },
-  { fullName: 'Влад', login: 'vlad', password: 'vladLadaSedan' }
+  { fullName: 'Влад', login: 'vlad', password: 'vladLadaSedan' },
+  { fullName: 'Санечка', login: 'sasha', password: 'sanechkaPASS' }
 ];
 
 export default function LoginForm() {
