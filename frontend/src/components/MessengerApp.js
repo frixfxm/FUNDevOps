@@ -115,6 +115,7 @@ export default function MessengerApp() {
     if (!token || !selectedUserId) return;
 
     let active = true;
+    let isFirstLoad = true;
 
     async function loadMessages() {
       try {
@@ -122,6 +123,14 @@ export default function MessengerApp() {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (active) {
+          // при первом открытии диалога не считаем существующие сообщения "новыми"
+          if (isFirstLoad) {
+            prevMessagesRef.current = data;
+            setMessages(data);
+            isFirstLoad = false;
+            return;
+          }
+
           if (currentUser) {
             const prevMessages = prevMessagesRef.current || [];
             const prevLastIncoming = [...prevMessages]
