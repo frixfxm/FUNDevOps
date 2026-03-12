@@ -16,9 +16,19 @@ function formatTime(dateString) {
 
 const MOBILE_BREAKPOINT = 768;
 
+function isUserOnline(lastSeen) {
+  if (!lastSeen) return false;
+  const last = new Date(lastSeen).getTime();
+  if (Number.isNaN(last)) return false;
+  const now = Date.now();
+  const diffSeconds = (now - last) / 1000;
+  return diffSeconds <= 60;
+}
+
 export default function MessengerApp() {
   const router = useRouter();
   const { addToast } = useToast();
+  const inputRef = useRef(null);
   const [token, setToken] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState([]);
@@ -31,6 +41,8 @@ export default function MessengerApp() {
   const [unreadCounts, setUnreadCounts] = useState({});
   const lastSeenRef = useRef({});
   const prevUnreadRef = useRef({});
+  const newMessageAudioRef = useRef(null);
+  const prevMessagesRef = useRef([]);
 
   useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
@@ -39,6 +51,12 @@ export default function MessengerApp() {
     mql.addEventListener('change', handler);
     return () => mql.removeEventListener('change', handler);
   }, []);
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [selectedUserId, mobileShowChat]);
 
   const selectedUser = useMemo(
     () => users.find((user) => user.id === selectedUserId) || null,
@@ -57,6 +75,21 @@ export default function MessengerApp() {
     setToken(savedToken);
     setCurrentUser(JSON.parse(savedUser));
   }, [router]);
+
+  useEffect(() => {
+    newMessageAudioRef.current = new Audio('/sounds/new-message-for-you-man.mp3');
+  }, []);
+
+  function playNewMessageSound() {
+    const audio = newMessageAudioRef.current;
+    if (!audio) return;
+    try {
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    } catch {
+      // игнорируем ошибки воспроизведения
+    }
+  }
 
   useEffect(() => {
     if (!token) return;
@@ -89,6 +122,27 @@ export default function MessengerApp() {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (active) {
+          if (currentUser) {
+            const prevMessages = prevMessagesRef.current || [];
+            const prevLastIncoming = [...prevMessages]
+              .reverse()
+              .find((item) => item.senderId === selectedUserId);
+            const prevLastIncomingId = prevLastIncoming ? prevLastIncoming.id : null;
+
+            const newLastIncoming = [...data]
+              .reverse()
+              .find((item) => item.senderId === selectedUserId);
+            const newLastIncomingId = newLastIncoming ? newLastIncoming.id : null;
+
+            if (
+              newLastIncomingId != null &&
+              (prevLastIncomingId == null || newLastIncomingId > prevLastIncomingId)
+            ) {
+              playNewMessageSound();
+            }
+          }
+
+          prevMessagesRef.current = data;
           setMessages(data);
         }
       } catch (err) {
@@ -180,6 +234,7 @@ export default function MessengerApp() {
               .find((item) => item.senderId === peerId && item.id > lastSeen);
 
             if (lastIncoming) {
+              playNewMessageSound();
               addToast({
                 title: user.fullName,
                 description: lastIncoming.body,
@@ -277,6 +332,7 @@ export default function MessengerApp() {
             {users.map((user) => {
               const active = selectedUserId === user.id;
               const unread = unreadCounts[user.id] ?? 0;
+              const online = isUserOnline(user.lastSeen);
               return (
                 <button
                   key={user.id}
@@ -303,8 +359,23 @@ export default function MessengerApp() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <img src={user.avatarUrl} alt={user.fullName} width="48" height="48" style={{ borderRadius: '999px', objectFit: 'cover', background: '#334155' }} />
                     <div style={{ textAlign: 'left' }}>
-                      <div style={{ fontWeight: 700 }}>{user.fullName}</div>
-                      <div style={{ color: '#94a3b8', fontSize: 14 }}>@{user.username}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontWeight: 700 }}>{user.fullName}</span>
+                        {online ? (
+                          <span
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: 999,
+                              background: '#22c55e'
+                            }}
+                          />
+                        ) : null}
+                      </div>
+                      <div style={{ color: '#94a3b8', fontSize: 14 }}>
+                        @{user.username}
+                        {online ? ' · в сети' : ''}
+                      </div>
                     </div>
                   </div>
                   {unread > 0 ? (
@@ -346,8 +417,22 @@ export default function MessengerApp() {
               <>
                 <img src={selectedUser.avatarUrl} alt={selectedUser.fullName} width="52" height="52" style={{ borderRadius: '999px' }} />
                 <div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>{selectedUser.fullName}</div>
-                  <div style={{ color: '#94a3b8' }}>Личный чат</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 20, fontWeight: 700 }}>{selectedUser.fullName}</span>
+                    {isUserOnline(selectedUser.lastSeen) ? (
+                      <span
+                        style={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: 999,
+                          background: '#22c55e'
+                        }}
+                      />
+                    ) : null}
+                  </div>
+                  <div style={{ color: '#94a3b8' }}>
+                    {isUserOnline(selectedUser.lastSeen) ? 'в сети' : 'оффлайн'}
+                  </div>
                 </div>
               </>
             ) : (
@@ -380,6 +465,7 @@ export default function MessengerApp() {
 
           <form onSubmit={sendMessage} style={{ padding: 20, borderTop: '1px solid #1e293b', display: 'flex', gap: 12 }}>
             <input
+              ref={inputRef}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               placeholder="Введите сообщение"

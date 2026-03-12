@@ -2,7 +2,7 @@ import { pool } from '../config/db.js';
 
 export async function getUsers(currentUserId) {
   const query = `
-    SELECT id, full_name, username, avatar_url
+    SELECT id, full_name, username, avatar_url, last_seen
     FROM users
     WHERE id <> $1
     ORDER BY full_name
@@ -13,7 +13,8 @@ export async function getUsers(currentUserId) {
     id: row.id,
     fullName: row.full_name,
     username: row.username,
-    avatarUrl: row.avatar_url
+    avatarUrl: row.avatar_url,
+    lastSeen: row.last_seen
   }));
 }
 
