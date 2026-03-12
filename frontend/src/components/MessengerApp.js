@@ -13,6 +13,8 @@ function formatTime(dateString) {
   });
 }
 
+const MOBILE_BREAKPOINT = 768;
+
 export default function MessengerApp() {
   const router = useRouter();
   const [token, setToken] = useState('');
@@ -22,6 +24,16 @@ export default function MessengerApp() {
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileShowChat, setMobileShowChat] = useState(false);
+
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+    const handler = () => setIsMobile(mql.matches);
+    handler();
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
 
   const selectedUser = useMemo(
     () => users.find((user) => user.id === selectedUserId) || null,
@@ -119,10 +131,16 @@ export default function MessengerApp() {
     return null;
   }
 
+  const gridClass = isMobile
+    ? mobileShowChat
+      ? 'messenger-grid mobile-show-chat'
+      : 'messenger-grid mobile-show-list'
+    : 'messenger-grid';
+
   return (
-    <div style={{ minHeight: '100vh', padding: 20, background: '#020617' }}>
-      <div style={{ height: 'calc(100vh - 40px)', display: 'grid', gridTemplateColumns: '320px 1fr', gap: 16 }}>
-        <aside style={{ background: '#111827', borderRadius: 20, border: '1px solid #334155', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className="messenger-page">
+      <div className={gridClass}>
+        <aside className="messenger-sidebar">
           <div style={{ padding: 20, borderBottom: '1px solid #1e293b' }}>
             <div style={{ fontSize: 14, color: '#94a3b8' }}>Вы вошли как</div>
             <div style={{ fontSize: 22, fontWeight: 700 }}>{currentUser.fullName}</div>
@@ -144,7 +162,10 @@ export default function MessengerApp() {
                 <button
                   key={user.id}
                   type="button"
-                  onClick={() => setSelectedUserId(user.id)}
+                  onClick={() => {
+                    setSelectedUserId(user.id);
+                    if (isMobile) setMobileShowChat(true);
+                  }}
                   style={{
                     width: '100%',
                     display: 'flex',
@@ -170,8 +191,17 @@ export default function MessengerApp() {
           </div>
         </aside>
 
-        <section style={{ background: '#111827', borderRadius: 20, border: '1px solid #334155', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <section className="messenger-chat">
           <header style={{ padding: 20, borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 12 }}>
+            {isMobile && (
+              <button
+                type="button"
+                onClick={() => setMobileShowChat(false)}
+                style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid #334155', background: '#0f172a', color: '#fff', cursor: 'pointer' }}
+              >
+                ← Назад
+              </button>
+            )}
             {selectedUser ? (
               <>
                 <img src={selectedUser.avatarUrl} alt={selectedUser.fullName} width="52" height="52" style={{ borderRadius: '999px' }} />

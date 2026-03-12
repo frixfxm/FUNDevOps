@@ -4,19 +4,10 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiRequest } from '@/lib/api';
 
-const demoUsers = [
-  { fullName: 'Люба', login: 'luba', password: 'May122004!' },
-  { fullName: 'Петр Петрович', login: 'peta', password: 'petaOWN' },
-  { fullName: 'Толя', login: 'tolya', password: 'Tolik0508' },
-  { fullName: 'Хомяк', login: 'dima', password: 'DIMASIK1213' },
-  { fullName: 'Влад', login: 'vlad', password: 'vladLadaSedan' },
-  { fullName: 'Санечка', login: 'sasha', password: 'sanechkaPASS' }
-];
-
 export default function LoginForm() {
   const router = useRouter();
-  const [login, setLogin] = useState('luba');
-  const [password, setPassword] = useState('May122004!');
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -42,46 +33,16 @@ export default function LoginForm() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24 }}>
-      <div style={{ width: '100%', maxWidth: 900, display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24 }}>
-        <section style={{ background: '#111827', borderRadius: 20, padding: 32, border: '1px solid #334155' }}>
+    <div className="login-page">
+      <div className="login-grid">
+        <section className="login-intro">
           <h1 style={{ marginTop: 0, fontSize: 34 }}>Учебный мессенджер</h1>
           <p style={{ color: '#94a3b8', lineHeight: 1.6 }}>
-            Вход только по готовым пользователям. Регистрации нет — проект подготовлен для практики с Docker,
-            Express, Next.js и Postgres.
+            Вы попали в новый телеграмм
           </p>
-          <div style={{ marginTop: 24 }}>
-            <h2 style={{ fontSize: 18 }}>Готовые пользователи</h2>
-            <div style={{ display: 'grid', gap: 12 }}>
-              {demoUsers.map((user) => (
-                <button
-                  key={user.login}
-                  type="button"
-                  onClick={() => {
-                    setLogin(user.login);
-                    setPassword(user.password);
-                  }}
-                  style={{
-                    textAlign: 'left',
-                    border: '1px solid #334155',
-                    background: '#0f172a',
-                    color: '#e2e8f0',
-                    borderRadius: 14,
-                    padding: 14,
-                    cursor: 'pointer'
-                  }}
-                >
-                  <strong>{user.fullName}</strong>
-                  <div style={{ color: '#94a3b8', marginTop: 6, fontSize: 14 }}>
-                    {user.login} / {user.password}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
         </section>
 
-        <form onSubmit={onSubmit} style={{ background: '#111827', borderRadius: 20, padding: 32, border: '1px solid #334155' }}>
+        <form onSubmit={onSubmit} className="login-form">
           <h2 style={{ marginTop: 0 }}>Вход</h2>
           <label style={{ display: 'block', marginBottom: 14 }}>
             <div style={{ marginBottom: 8 }}>Логин</div>
@@ -115,3 +76,4 @@ export default function LoginForm() {
     </div>
   );
 }
+

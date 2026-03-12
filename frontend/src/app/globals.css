@@ -22,3 +22,108 @@ button, input {
 body {
   min-height: 100vh;
 }
+
+/* Login page */
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-grid {
+  width: 100%;
+  max-width: 900px;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 24px;
+}
+
+.login-intro,
+.login-form {
+  background: #111827;
+  border-radius: 20px;
+  padding: 32px;
+  border: 1px solid #334155;
+}
+
+@media (max-width: 768px) {
+  .login-page {
+    padding: 16px;
+  }
+
+  .login-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .login-intro,
+  .login-form {
+    padding: 24px;
+  }
+}
+
+/* Messenger: mobile = list or chat */
+.messenger-page {
+  min-height: 100vh;
+  padding: 20px;
+  background: #020617;
+}
+
+.messenger-grid {
+  height: calc(100vh - 40px);
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+}
+
+.messenger-sidebar {
+  background: #111827;
+  border-radius: 20px;
+  border: 1px solid #334155;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.messenger-chat {
+  background: #111827;
+  border-radius: 20px;
+  border: 1px solid #334155;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  .messenger-page {
+    padding: 12px;
+  }
+
+  .messenger-grid {
+    height: auto;
+    min-height: calc(100vh - 24px);
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .messenger-sidebar {
+    display: none;
+  }
+
+  .messenger-chat {
+    display: none;
+  }
+
+  .messenger-grid.mobile-show-list .messenger-sidebar {
+    display: flex;
+    flex: 1;
+    min-height: calc(100vh - 24px);
+  }
+
+  .messenger-grid.mobile-show-chat .messenger-chat {
+    display: flex;
+    flex: 1;
+    min-height: calc(100vh - 24px);
+  }
+}
