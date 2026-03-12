@@ -1,0 +1,32 @@
+import express from 'express';
+import cors from 'cors';
+import authRoutes from './routes/auth.routes.js';
+import chatRoutes from './routes/chat.routes.js';
+import { env } from './config/env.js';
+import { pool } from './config/db.js';
+
+const app = express();
+
+app.use(cors({ origin: env.clientUrl, credentials: false }));
+app.use(express.json());
+
+app.get('/api/health', async (_req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok' });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+app.use('/api/auth', authRoutes);
+app.use('/api/chat', chatRoutes);
+
+app.use((error, _req, res, _next) => {
+  console.error(error);
+  res.status(500).json({ message: 'Internal server error' });
+});
+
+app.listen(env.port, () => {
+  console.log(`Backend started on http://localhost:${env.port}`);
+});
