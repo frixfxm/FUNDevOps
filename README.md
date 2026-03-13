@@ -98,6 +98,8 @@ npm run dev
 
 ### 1. Запуск приложения (Docker)
 
+Файлы `.env` не нужны — в `docker-compose.yml` заданы значения по умолчанию, фронт ходит в API по относительному пути `/api` (подойдёт любой домен за nginx).
+
 ```bash
 docker compose build
 docker compose up -d
