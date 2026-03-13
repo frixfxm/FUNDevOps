@@ -1,7 +1,11 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
 export function getPresenceWsUrl() {
-  const base = API_URL.replace(/^http/, 'ws').replace(/\/api\/?$/, '');
+  let base = API_URL.replace(/^http/, 'ws').replace(/\/api\/?$/, '');
+  if (typeof window !== 'undefined' && window.location && base.includes('localhost')) {
+    base = base.replace('localhost', window.location.hostname);
+  }
+  base = base.replace(/\/+$/, '');
   return `${base}/ws/presence`;
 }
 

@@ -36,6 +36,8 @@ export default function MessengerApp() {
   const [onlineUserIds, setOnlineUserIds] = useState(() => new Set());
   const [typingUserId, setTypingUserId] = useState(null);
   const wsRef = useRef(null);
+  const [wsReconnectKey, setWsReconnectKey] = useState(0);
+  const reconnectTimeoutRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const typingSendTimeoutRef = useRef(null);
   const lastSeenRef = useRef({});
@@ -154,15 +156,53 @@ export default function MessengerApp() {
     };
   }, [token, searchQuery]);
 
+  const wsClosedByUsRef = useRef(false);
+  const wsReconnectAttemptsRef = useRef(0);
+  const wsTryAuthByMessageRef = useRef(false);
+
   useEffect(() => {
     if (!token) return;
-    const wsUrl = `${getPresenceWsUrl()}?token=${encodeURIComponent(token)}`;
+
+    if (wsReconnectKey === 0) {
+      wsReconnectAttemptsRef.current = 0;
+      wsTryAuthByMessageRef.current = false;
+    } else {
+      wsReconnectAttemptsRef.current += 1;
+    }
+    if (wsReconnectAttemptsRef.current > 15) return;
+
+    wsClosedByUsRef.current = false;
+    const baseWsUrl = getPresenceWsUrl();
+    const wsUrl = wsTryAuthByMessageRef.current
+      ? baseWsUrl
+      : `${baseWsUrl}?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+
+    function scheduleReconnect() {
+      if (reconnectTimeoutRef.current) return;
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        setWsReconnectKey((k) => k + 1);
+      }, 2000);
+    }
+
+    ws.onopen = () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      if (wsTryAuthByMessageRef.current) {
+        ws.send(JSON.stringify({ type: 'auth', token }));
+        wsTryAuthByMessageRef.current = false;
+      }
+    };
+
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'online_list' && Array.isArray(data.userIds)) {
+          wsReconnectAttemptsRef.current = 0;
           setOnlineUserIds(new Set(data.userIds));
           return;
         }
@@ -185,12 +225,32 @@ export default function MessengerApp() {
         }
       } catch {}
     };
+
+    ws.onerror = () => {
+      scheduleReconnect();
+    };
+
+    ws.onclose = (event) => {
+      wsRef.current = null;
+      if (!wsClosedByUsRef.current) {
+        if (event.code === 4001 || event.code === 4002) {
+          wsTryAuthByMessageRef.current = true;
+        }
+        scheduleReconnect();
+      }
+    };
+
     return () => {
+      wsClosedByUsRef.current = true;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       wsRef.current = null;
       ws.close();
     };
-  }, [token]);
+  }, [token, wsReconnectKey]);
 
   useEffect(() => {
     if (!selectedUserId || !message.trim()) return;
