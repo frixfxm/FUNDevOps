@@ -150,3 +150,93 @@ body {
     min-height: calc(100vh - 24px);
   }
 }
+
+/* Mic permission banner */
+.mic-banner {
+  animation: slideDown 0.25s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Incoming call modal */
+.incoming-call-overlay {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.incoming-call-modal {
+  animation: scaleIn 0.25s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.call-modal-btn {
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.call-modal-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.call-modal-btn:active {
+  transform: translateY(0);
+}
+
+.call-modal-accept:hover {
+  background: #16a34a;
+}
+
+.call-modal-reject:hover {
+  background: #475569;
+}
+
+/* Call buttons in header */
+.call-btn {
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.call-btn:hover {
+  opacity: 0.9;
+  transform: scale(1.05);
+}
+
+.call-btn:active {
+  transform: scale(0.98);
+}
+
+.call-btn-start:hover {
+  background: #1e293b;
+  color: #4ade80;
+}
+
+@media (max-width: 768px) {
+  .in-call-label {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

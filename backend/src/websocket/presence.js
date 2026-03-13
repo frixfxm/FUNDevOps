@@ -36,6 +36,17 @@ export function setupPresenceWebSocket(server) {
       }
     }
 
+    function sendToUser(targetUserId, payload) {
+      if (targetUserId === userId) return;
+      const peerSet = onlineUsers.get(targetUserId);
+      if (peerSet) {
+        const str = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        for (const peerWs of peerSet) {
+          if (peerWs.readyState === 1) peerWs.send(str);
+        }
+      }
+    }
+
     function handleMessage(raw) {
       try {
         const data = JSON.parse(raw.toString());
@@ -44,13 +55,29 @@ export function setupPresenceWebSocket(server) {
             const peerId = data.peerId;
             const senderId = ws.userId;
             if (senderId === peerId) return;
-            const peerSet = onlineUsers.get(peerId);
-            if (peerSet) {
-              const payload = JSON.stringify({ type: 'typing', userId: senderId });
-              for (const peerWs of peerSet) {
-                if (peerWs.readyState === 1) peerWs.send(payload);
-              }
-            }
+            sendToUser(peerId, { type: 'typing', userId: senderId });
+          } else if (data.type === 'call_offer' && typeof data.toUserId === 'number' && data.sdp) {
+            sendToUser(data.toUserId, {
+              type: 'call_offer',
+              fromUserId: userId,
+              sdp: data.sdp
+            });
+          } else if (data.type === 'call_answer' && typeof data.toUserId === 'number' && data.sdp) {
+            sendToUser(data.toUserId, {
+              type: 'call_answer',
+              fromUserId: userId,
+              sdp: data.sdp
+            });
+          } else if (data.type === 'call_reject' && typeof data.toUserId === 'number') {
+            sendToUser(data.toUserId, { type: 'call_reject', fromUserId: userId });
+          } else if (data.type === 'call_end' && typeof data.toUserId === 'number') {
+            sendToUser(data.toUserId, { type: 'call_end', fromUserId: userId });
+          } else if (data.type === 'call_ice' && typeof data.toUserId === 'number' && data.candidate != null) {
+            sendToUser(data.toUserId, {
+              type: 'call_ice',
+              fromUserId: userId,
+              candidate: data.candidate
+            });
           }
           return;
         }

@@ -45,6 +45,43 @@ export default function MessengerApp() {
   const newMessageAudioRef = useRef(null);
   const prevMessagesRef = useRef([]);
 
+  const [showMicBanner, setShowMicBanner] = useState(false);
+  const [micPermissionRequested, setMicPermissionRequested] = useState(false);
+  const [incomingCallFrom, setIncomingCallFrom] = useState(null);
+  const [incomingOfferSdp, setIncomingOfferSdp] = useState(null);
+  const [callingUserId, setCallingUserId] = useState(null);
+  const [inCallWithUserId, setInCallWithUserId] = useState(null);
+
+  const peerConnectionRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const remoteAudioRef = useRef(null);
+  const ringtoneRef = useRef(null);
+  const ringbackRef = useRef(null);
+  const callTimeoutRef = useRef(null);
+  const callTargetUserIdRef = useRef(null);
+  const inCallPeerRef = useRef(null);
+  const pendingIceRef = useRef([]);
+  const conversationsRef = useRef([]);
+  const searchResultsRef = useRef([]);
+  const callingUserIdRef = useRef(null);
+  const inCallWithUserIdRef = useRef(null);
+  const incomingCallFromRef = useRef(null);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+    searchResultsRef.current = searchResults;
+  }, [conversations, searchResults]);
+
+  useEffect(() => {
+    return () => cleanupCall();
+  }, []);
+
+  useEffect(() => {
+    callingUserIdRef.current = callingUserId;
+    inCallWithUserIdRef.current = inCallWithUserId;
+    incomingCallFromRef.current = incomingCallFrom;
+  }, [callingUserId, inCallWithUserId, incomingCallFrom]);
+
   const isUserOnline = useCallback((userId) => onlineUserIds.has(userId), [onlineUserIds]);
 
   const [selectedUserFromSearch, setSelectedUserFromSearch] = useState(null);
@@ -103,6 +140,164 @@ export default function MessengerApp() {
   useEffect(() => {
     newMessageAudioRef.current = new Audio('/sounds/new-message-for-you-man.mp3');
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const asked = sessionStorage.getItem('messenger_mic_permission_asked');
+    if (!asked) {
+      setShowMicBanner(true);
+    }
+  }, [currentUser]);
+
+  async function requestMicPermission() {
+    try {
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+      sessionStorage.setItem('messenger_mic_permission_asked', '1');
+      setShowMicBanner(false);
+      setMicPermissionRequested(true);
+    } catch {
+      setShowMicBanner(false);
+      sessionStorage.setItem('messenger_mic_permission_asked', '1');
+    }
+  }
+
+  function stopCallSounds() {
+    if (ringtoneRef.current) {
+      ringtoneRef.current.pause();
+      ringtoneRef.current.currentTime = 0;
+    }
+    if (ringbackRef.current) {
+      ringbackRef.current.pause();
+      ringbackRef.current.currentTime = 0;
+    }
+  }
+
+  function cleanupCall() {
+    stopCallSounds();
+    if (callTimeoutRef.current) {
+      clearTimeout(callTimeoutRef.current);
+      callTimeoutRef.current = null;
+    }
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+    }
+    pendingIceRef.current = [];
+    callTargetUserIdRef.current = null;
+    inCallPeerRef.current = null;
+    setCallingUserId(null);
+    setInCallWithUserId(null);
+    setIncomingCallFrom(null);
+    setIncomingOfferSdp(null);
+  }
+
+  async function startCall() {
+    if (!selectedUser || !wsRef.current || wsRef.current.readyState !== 1) return;
+    if (callingUserId || inCallWithUserId) return;
+    if (!isUserOnline(selectedUser.id)) {
+      addToast({ title: 'Пользователь не в сети' });
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      localStreamRef.current = stream;
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      peerConnectionRef.current = pc;
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      pc.ontrack = (e) => {
+        if (remoteAudioRef.current && e.streams[0]) {
+          remoteAudioRef.current.srcObject = e.streams[0];
+        }
+      };
+      pc.onicecandidate = (e) => {
+        if (e.candidate && wsRef.current?.readyState === 1) {
+          wsRef.current.send(JSON.stringify({ type: 'call_ice', toUserId: selectedUser.id, candidate: e.candidate }));
+        }
+      };
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      wsRef.current.send(JSON.stringify({ type: 'call_offer', toUserId: selectedUser.id, sdp: offer }));
+      callTargetUserIdRef.current = selectedUser.id;
+      inCallPeerRef.current = { id: selectedUser.id, fullName: selectedUser.fullName };
+      setCallingUserId(selectedUser.id);
+      const ringback = new Audio('/sounds/gudki.mp3');
+      ringback.loop = true;
+      ringback.play().catch(() => {});
+      ringbackRef.current = ringback;
+      callTimeoutRef.current = setTimeout(() => {
+        callTimeoutRef.current = null;
+        if (callingUserIdRef.current === callTargetUserIdRef.current) {
+          cleanupCall();
+          addToast({ title: 'Нет ответа' });
+        }
+      }, 60000);
+    } catch (err) {
+      addToast({ title: 'Не удалось начать звонок', description: err.message });
+      cleanupCall();
+    }
+  }
+
+  function cancelCall() {
+    if (!callingUserId || !wsRef.current || wsRef.current.readyState !== 1) return;
+    wsRef.current.send(JSON.stringify({ type: 'call_end', toUserId: callingUserId }));
+    cleanupCall();
+  }
+
+  async function acceptCall() {
+    if (!incomingCallFrom || !incomingOfferSdp || !wsRef.current || wsRef.current.readyState !== 1) return;
+    const fromId = incomingCallFrom.id;
+    stopCallSounds();
+    setIncomingCallFrom(null);
+    setIncomingOfferSdp(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      localStreamRef.current = stream;
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      peerConnectionRef.current = pc;
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      pc.ontrack = (e) => {
+        if (remoteAudioRef.current && e.streams[0]) {
+          remoteAudioRef.current.srcObject = e.streams[0];
+        }
+      };
+      pc.onicecandidate = (e) => {
+        if (e.candidate && wsRef.current?.readyState === 1) {
+          wsRef.current.send(JSON.stringify({ type: 'call_ice', toUserId: fromId, candidate: e.candidate }));
+        }
+      };
+      await pc.setRemoteDescription(new RTCSessionDescription(incomingOfferSdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      wsRef.current.send(JSON.stringify({ type: 'call_answer', toUserId: fromId, sdp: answer }));
+      pendingIceRef.current.forEach((c) => pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {}));
+      pendingIceRef.current = [];
+      inCallPeerRef.current = { id: fromId, fullName: incomingCallFrom.fullName };
+      setInCallWithUserId(fromId);
+    } catch (err) {
+      addToast({ title: 'Не удалось принять звонок', description: err.message });
+      if (wsRef.current?.readyState === 1) {
+        wsRef.current.send(JSON.stringify({ type: 'call_reject', toUserId: fromId }));
+      }
+    }
+  }
+
+  function rejectCall() {
+    if (!incomingCallFrom || !wsRef.current || wsRef.current.readyState !== 1) return;
+    wsRef.current.send(JSON.stringify({ type: 'call_reject', toUserId: incomingCallFrom.id }));
+    stopCallSounds();
+    setIncomingCallFrom(null);
+    setIncomingOfferSdp(null);
+  }
+
+  function endCall() {
+    if (!inCallWithUserId || !wsRef.current || wsRef.current.readyState !== 1) return;
+    wsRef.current.send(JSON.stringify({ type: 'call_end', toUserId: inCallWithUserId }));
+    cleanupCall();
+  }
 
   function playNewMessageSound() {
     const audio = newMessageAudioRef.current;
@@ -222,6 +417,73 @@ export default function MessengerApp() {
             setTypingUserId(null);
             typingTimeoutRef.current = null;
           }, 3000);
+        }
+        if (data.type === 'call_offer' && typeof data.fromUserId === 'number' && data.sdp) {
+          if (inCallWithUserIdRef.current || callingUserIdRef.current) return;
+          const conv = conversationsRef.current || [];
+          const search = searchResultsRef.current || [];
+          const caller = conv.find((c) => c.id === data.fromUserId) || search.find((r) => r.id === data.fromUserId) || { id: data.fromUserId, fullName: 'Пользователь', avatarUrl: '' };
+          setIncomingCallFrom(caller);
+          setIncomingOfferSdp(data.sdp);
+          const ring = new Audio('/sounds/zvonok.mp3');
+          ring.loop = true;
+          ring.play().catch(() => {});
+          ringtoneRef.current = ring;
+        }
+        if (data.type === 'call_answer' && typeof data.fromUserId === 'number' && data.sdp) {
+          const pc = peerConnectionRef.current;
+          if (pc && callingUserIdRef.current === data.fromUserId) {
+            if (callTimeoutRef.current) {
+              clearTimeout(callTimeoutRef.current);
+              callTimeoutRef.current = null;
+            }
+            pc.setRemoteDescription(new RTCSessionDescription(data.sdp)).then(() => {
+              pendingIceRef.current.forEach((c) => pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {}));
+              pendingIceRef.current = [];
+            }).catch(() => {});
+            if (ringbackRef.current) {
+              ringbackRef.current.pause();
+              ringbackRef.current.currentTime = 0;
+            }
+            setCallingUserId(null);
+            setInCallWithUserId(data.fromUserId);
+          }
+        }
+        if (data.type === 'call_reject' && typeof data.fromUserId === 'number') {
+          if (ringbackRef.current) {
+            ringbackRef.current.pause();
+            ringbackRef.current.currentTime = 0;
+          }
+          setCallingUserId(null);
+          if (peerConnectionRef.current) {
+            peerConnectionRef.current.close();
+            peerConnectionRef.current = null;
+          }
+          if (localStreamRef.current) {
+            localStreamRef.current.getTracks().forEach((t) => t.stop());
+            localStreamRef.current = null;
+          }
+          addToast({ title: 'Собеседник отклонил звонок' });
+        }
+        if (data.type === 'call_end' && typeof data.fromUserId === 'number') {
+          if (inCallWithUserIdRef.current === data.fromUserId) {
+            cleanupCall();
+          } else {
+            const from = incomingCallFromRef.current;
+            if (from && from.id === data.fromUserId) {
+              stopCallSounds();
+              setIncomingCallFrom(null);
+              setIncomingOfferSdp(null);
+            }
+          }
+        }
+        if (data.type === 'call_ice' && typeof data.fromUserId === 'number' && data.candidate != null) {
+          const pc = peerConnectionRef.current;
+          if (pc) {
+            pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {});
+          } else {
+            pendingIceRef.current.push(data.candidate);
+          }
         }
       } catch {}
     };
@@ -487,9 +749,38 @@ export default function MessengerApp() {
       : 'messenger-grid mobile-show-list'
     : 'messenger-grid';
 
+  const inCallPeerName = (inCallWithUserId && inCallPeerRef.current?.fullName) ? inCallPeerRef.current.fullName : (inCallWithUserId ? 'собеседником' : '');
+
   return (
     <div className="messenger-page">
-      <div className={gridClass}>
+      {showMicBanner && (
+        <div className="mic-banner" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 40, padding: '12px 20px', background: '#1e293b', borderBottom: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <span style={{ fontSize: 14, color: '#e2e8f0' }}>Для звонков нужен доступ к микрофону</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" onClick={requestMicPermission} style={{ padding: '8px 16px', borderRadius: 10, border: 'none', background: '#22c55e', color: '#fff', cursor: 'pointer', fontSize: 14 }}>Разрешить</button>
+            <button type="button" onClick={() => { setShowMicBanner(false); sessionStorage.setItem('messenger_mic_permission_asked', '1'); }} style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 14 }}>Позже</button>
+          </div>
+        </div>
+      )}
+
+      {incomingCallFrom && (
+        <div className="incoming-call-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={(e) => e.target === e.currentTarget && rejectCall()}>
+          <div className="incoming-call-modal" style={{ background: '#111827', borderRadius: 20, padding: 32, border: '1px solid #334155', maxWidth: 360, width: '100%', textAlign: 'center', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ marginBottom: 20 }}>
+              <img src={incomingCallFrom.avatarUrl || ''} alt="" width="80" height="80" style={{ borderRadius: '50%', objectFit: 'cover', background: '#334155' }} />
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Вам звонит {incomingCallFrom.fullName}</div>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24 }}>
+              <button type="button" onClick={acceptCall} className="call-modal-btn call-modal-accept" style={{ padding: '14px 28px', borderRadius: 14, border: 'none', background: '#22c55e', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Взять</button>
+              <button type="button" onClick={rejectCall} className="call-modal-btn call-modal-reject" style={{ padding: '14px 28px', borderRadius: 14, border: '1px solid #475569', background: '#334155', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Сбросить</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
+
+      <div className={gridClass} style={{ marginTop: showMicBanner ? 52 : 0 }}>
         <aside className="messenger-sidebar">
           <div style={{ padding: 20, borderBottom: '1px solid #1e293b' }}>
             <div style={{ fontSize: 14, color: '#94a3b8' }}>Вы вошли как</div>
@@ -609,7 +900,7 @@ export default function MessengerApp() {
         </aside>
 
         <section className="messenger-chat">
-          <header style={{ padding: 20, borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <header className="messenger-chat-header" style={{ padding: 20, borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 12 }}>
             {isMobile && (
               <button
                 type="button"
@@ -622,7 +913,7 @@ export default function MessengerApp() {
             {selectedUser ? (
               <>
                 <img src={selectedUser.avatarUrl} alt={selectedUser.fullName} width="52" height="52" style={{ borderRadius: '999px' }} />
-                <div>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 20, fontWeight: 700 }}>{selectedUser.fullName}</span>
                     {isUserOnline(selectedUser.id) ? (
@@ -643,6 +934,47 @@ export default function MessengerApp() {
                         ? 'в сети'
                         : 'оффлайн'}
                   </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {inCallWithUserId ? (
+                    <>
+                      <span className="in-call-label" style={{ fontSize: 14, color: '#94a3b8' }}>
+                        Разговор с {inCallPeerName || 'собеседником'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={endCall}
+                        className="call-btn call-btn-end"
+                        title="Завершить"
+                        style={{ width: 40, height: 40, borderRadius: '50%', border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
+                      </button>
+                    </>
+                  ) : callingUserId ? (
+                    <>
+                      <span style={{ fontSize: 14, color: '#94a3b8' }}>Звонок...</span>
+                      <button
+                        type="button"
+                        onClick={cancelCall}
+                        className="call-btn call-btn-cancel"
+                        title="Отменить"
+                        style={{ width: 40, height: 40, borderRadius: '50%', border: 'none', background: '#64748b', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={startCall}
+                      className="call-btn call-btn-start"
+                      title="Позвонить"
+                      style={{ width: 40, height: 40, borderRadius: '50%', border: '1px solid #334155', background: '#0f172a', color: '#22c55e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
+                    </button>
+                  )}
                 </div>
               </>
             ) : (
