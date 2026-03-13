@@ -34,6 +34,10 @@ export default function MessengerApp() {
   const [mobileShowChat, setMobileShowChat] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
   const [onlineUserIds, setOnlineUserIds] = useState(() => new Set());
+  const [typingUserId, setTypingUserId] = useState(null);
+  const wsRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+  const typingSendTimeoutRef = useRef(null);
   const lastSeenRef = useRef({});
   const prevUnreadRef = useRef({});
   const newMessageAudioRef = useRef(null);
@@ -56,6 +60,10 @@ export default function MessengerApp() {
       inputRef.current.focus();
     }
   }, [selectedUserId, mobileShowChat]);
+
+  useEffect(() => {
+    setTypingUserId(null);
+  }, [selectedUserId]);
 
   const selectedUser = useMemo(() => {
     if (!selectedUserId) return null;
@@ -150,9 +158,14 @@ export default function MessengerApp() {
     if (!token) return;
     const wsUrl = `${getPresenceWsUrl()}?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (data.type === 'online_list' && Array.isArray(data.userIds)) {
+          setOnlineUserIds(new Set(data.userIds));
+          return;
+        }
         if (data.type === 'presence' && typeof data.userId === 'number') {
           setOnlineUserIds((prev) => {
             const next = new Set(prev);
@@ -160,11 +173,38 @@ export default function MessengerApp() {
             else next.delete(data.userId);
             return next;
           });
+          return;
+        }
+        if (data.type === 'typing' && typeof data.userId === 'number') {
+          setTypingUserId(data.userId);
+          if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = setTimeout(() => {
+            setTypingUserId(null);
+            typingTimeoutRef.current = null;
+          }, 3000);
         }
       } catch {}
     };
-    return () => ws.close();
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      wsRef.current = null;
+      ws.close();
+    };
   }, [token]);
+
+  useEffect(() => {
+    if (!selectedUserId || !message.trim()) return;
+    if (typingSendTimeoutRef.current) clearTimeout(typingSendTimeoutRef.current);
+    typingSendTimeoutRef.current = setTimeout(() => {
+      if (wsRef.current?.readyState === 1) {
+        wsRef.current.send(JSON.stringify({ type: 'typing', peerId: selectedUserId }));
+      }
+      typingSendTimeoutRef.current = null;
+    }, 300);
+    return () => {
+      if (typingSendTimeoutRef.current) clearTimeout(typingSendTimeoutRef.current);
+    };
+  }, [message, selectedUserId]);
 
   useEffect(() => {
     if (!token || !selectedUserId) return;
@@ -537,7 +577,11 @@ export default function MessengerApp() {
                     ) : null}
                   </div>
                   <div style={{ color: '#94a3b8' }}>
-                    {isUserOnline(selectedUser.id) ? 'в сети' : 'оффлайн'}
+                    {typingUserId === selectedUser.id
+                      ? 'печатает...'
+                      : isUserOnline(selectedUser.id)
+                        ? 'в сети'
+                        : 'оффлайн'}
                   </div>
                 </div>
               </>
@@ -575,6 +619,11 @@ export default function MessengerApp() {
               ref={inputRef}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
+              onFocus={() => {
+                if (selectedUserId && message.trim() && wsRef.current?.readyState === 1) {
+                  wsRef.current.send(JSON.stringify({ type: 'typing', peerId: selectedUserId }));
+                }
+              }}
               placeholder="Введите сообщение"
               style={{
                 flex: 1,

@@ -38,7 +38,31 @@ export function setupPresenceWebSocket(server) {
       onlineUsers.set(userId, new Set());
     }
     onlineUsers.get(userId).add(ws);
+    ws.userId = userId;
     broadcastPresence(userId, true);
+
+    const currentOnlineIds = Array.from(onlineUsers.keys());
+    if (ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'online_list', userIds: currentOnlineIds }));
+    }
+
+    ws.on('message', (raw) => {
+      try {
+        const data = JSON.parse(raw.toString());
+        if (data.type === 'typing' && typeof data.peerId === 'number') {
+          const peerId = data.peerId;
+          const senderId = ws.userId;
+          if (senderId === peerId) return;
+          const peerSet = onlineUsers.get(peerId);
+          if (peerSet) {
+            const payload = JSON.stringify({ type: 'typing', userId: senderId });
+            for (const peerWs of peerSet) {
+              if (peerWs.readyState === 1) peerWs.send(payload);
+            }
+          }
+        }
+      } catch {}
+    });
 
     ws.on('close', () => {
       const set = onlineUsers.get(userId);
