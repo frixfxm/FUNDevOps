@@ -92,6 +92,49 @@ npm run dev
 - добавить nginx reverse proxy
 - добавить websocket вместо polling
 
+## HTTPS через nginx (для звонков и микрофона)
+
+Браузер даёт доступ к микрофону только по HTTPS. Ниже — вариант с твоим nginx.
+
+### 1. Запуск приложения (Docker)
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+Frontend будет на порту 3000, backend на 4000 (nginx проксирует на них).
+
+### 2. Конфиг nginx с HTTPS
+
+Два блока `server`: первый — `listen 80` с `return 301 https://$host$request_uri;`; второй — `listen 443 ssl` с путями к сертификатам и `location /`, `/api/`, `/ws/` (proxy_pass на 127.0.0.1:3000 и 127.0.0.1:4000, заголовки Upgrade/Connection для WebSocket).
+
+**Самоподписанный сертификат (тест без домена):**
+
+```bash
+sudo mkdir -p /etc/nginx/ssl
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/nginx/ssl/messenger.key \
+  -out /etc/nginx/ssl/messenger.crt \
+  -subj "/CN=localhost"
+```
+
+В блоке 443 укажи `ssl_certificate /etc/nginx/ssl/messenger.crt` и `ssl_certificate_key /etc/nginx/ssl/messenger.key`.
+
+**С доменом (Let's Encrypt):** `sudo certbot --nginx -d ваш-домен` — certbot настроит SSL.
+
+### 3. Frontend — URL API
+
+В `frontend/.env` укажи адрес сайта по HTTPS:
+
+```bash
+NEXT_PUBLIC_API_URL=https://ТВОЙ_ДОМЕН/api
+```
+
+(Для теста с localhost: `https://localhost/api` — если nginx слушает на том же сервере.)
+
+Пересобери frontend (`docker compose build frontend` и `docker compose up -d`), затем открой сайт в браузере по **https://**.
+
 ## Подсказка по Docker
 
 Тебе понадобятся 3 сервиса:
