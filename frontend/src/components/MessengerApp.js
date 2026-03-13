@@ -209,8 +209,12 @@ export default function MessengerApp() {
       peerConnectionRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
       pc.ontrack = (e) => {
-        if (remoteAudioRef.current && e.streams[0]) {
-          remoteAudioRef.current.srcObject = e.streams[0];
+        const el = remoteAudioRef.current;
+        if (!el) return;
+        const remoteStream = e.streams?.[0] || (e.track ? new MediaStream([e.track]) : null);
+        if (remoteStream) {
+          el.srcObject = remoteStream;
+          el.play().catch(() => {});
         }
       };
       pc.onicecandidate = (e) => {
@@ -260,8 +264,12 @@ export default function MessengerApp() {
       peerConnectionRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
       pc.ontrack = (e) => {
-        if (remoteAudioRef.current && e.streams[0]) {
-          remoteAudioRef.current.srcObject = e.streams[0];
+        const el = remoteAudioRef.current;
+        if (!el) return;
+        const remoteStream = e.streams?.[0] || (e.track ? new MediaStream([e.track]) : null);
+        if (remoteStream) {
+          el.srcObject = remoteStream;
+          el.play().catch(() => {});
         }
       };
       pc.onicecandidate = (e) => {
@@ -778,7 +786,13 @@ export default function MessengerApp() {
         </div>
       )}
 
-      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
+      <audio
+        ref={remoteAudioRef}
+        autoPlay
+        playsInline
+        style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
+        aria-hidden
+      />
 
       <div className={gridClass} style={{ marginTop: showMicBanner ? 52 : 0 }}>
         <aside className="messenger-sidebar">
