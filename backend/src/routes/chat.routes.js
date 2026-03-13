@@ -1,13 +1,19 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.middleware.js';
-import { createMessage, getMessages, getUsers } from '../services/chat.service.js';
+import { createMessage, getMessages, getUsersWithConversations, searchUsers } from '../services/chat.service.js';
 
 const router = Router();
 
 router.use(requireAuth);
 
-router.get('/users', async (req, res) => {
-  const users = await getUsers(req.user.id);
+router.get('/conversations', async (req, res) => {
+  const users = await getUsersWithConversations(req.user.id);
+  res.json(users);
+});
+
+router.get('/users/search', async (req, res) => {
+  const q = req.query.q;
+  const users = await searchUsers(req.user.id, q);
   res.json(users);
 });
 

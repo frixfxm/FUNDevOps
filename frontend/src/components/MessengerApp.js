@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiRequest } from '@/lib/api';
+import { apiRequest, getPresenceWsUrl } from '@/lib/api';
 import { useToast } from '@/components/ToastProvider';
 
 function formatTime(dateString) {
@@ -16,22 +16,16 @@ function formatTime(dateString) {
 
 const MOBILE_BREAKPOINT = 768;
 
-function isUserOnline(lastSeen) {
-  if (!lastSeen) return false;
-  const last = new Date(lastSeen).getTime();
-  if (Number.isNaN(last)) return false;
-  const now = Date.now();
-  const diffSeconds = (now - last) / 1000;
-  return diffSeconds <= 60;
-}
-
 export default function MessengerApp() {
   const router = useRouter();
   const { addToast } = useToast();
   const inputRef = useRef(null);
+  const messagesEndRef = useRef(null);
   const [token, setToken] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
-  const [users, setUsers] = useState([]);
+  const [conversations, setConversations] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState('');
@@ -39,10 +33,15 @@ export default function MessengerApp() {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileShowChat, setMobileShowChat] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
+  const [onlineUserIds, setOnlineUserIds] = useState(() => new Set());
   const lastSeenRef = useRef({});
   const prevUnreadRef = useRef({});
   const newMessageAudioRef = useRef(null);
   const prevMessagesRef = useRef([]);
+
+  const isUserOnline = useCallback((userId) => onlineUserIds.has(userId), [onlineUserIds]);
+
+  const [selectedUserFromSearch, setSelectedUserFromSearch] = useState(null);
 
   useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
@@ -58,10 +57,25 @@ export default function MessengerApp() {
     }
   }, [selectedUserId, mobileShowChat]);
 
-  const selectedUser = useMemo(
-    () => users.find((user) => user.id === selectedUserId) || null,
-    [users, selectedUserId]
-  );
+  const selectedUser = useMemo(() => {
+    if (!selectedUserId) return null;
+    const fromConv = conversations.find((u) => u.id === selectedUserId);
+    if (fromConv) return fromConv;
+    const fromSearch = searchResults.find((u) => u.id === selectedUserId);
+    if (fromSearch) return fromSearch;
+    return selectedUserFromSearch?.id === selectedUserId ? selectedUserFromSearch : null;
+  }, [conversations, searchResults, selectedUserId, selectedUserFromSearch]);
+
+  const sidebarList = useMemo(() => {
+    if (searchQuery.trim()) return searchResults;
+    if (!selectedUserId) return conversations;
+    const inConv = conversations.some((c) => c.id === selectedUserId);
+    if (inConv) return conversations;
+    if (selectedUserFromSearch?.id === selectedUserId) {
+      return [...conversations, selectedUserFromSearch];
+    }
+    return conversations;
+  }, [searchQuery, searchResults, conversations, selectedUserId, selectedUserFromSearch]);
 
   useEffect(() => {
     const savedToken = localStorage.getItem('messenger_token');
@@ -94,21 +108,62 @@ export default function MessengerApp() {
   useEffect(() => {
     if (!token) return;
 
-    async function loadUsers() {
+    async function loadConversations() {
       try {
-        const data = await apiRequest('/chat/users', {
+        const data = await apiRequest('/chat/conversations', {
           headers: { Authorization: `Bearer ${token}` }
         });
-        setUsers(data);
-        if (data.length > 0) {
-          setSelectedUserId((prev) => prev ?? data[0].id);
-        }
+        setConversations(data);
       } catch (err) {
         setError(err.message);
       }
     }
 
-    loadUsers();
+    loadConversations();
+  }, [token]);
+
+  const searchDebounceRef = useRef(null);
+  useEffect(() => {
+    if (!token || !searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    const q = searchQuery.trim();
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const data = await apiRequest(`/chat/users/search?q=${encodeURIComponent(q)}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setSearchResults(data);
+      } catch {
+        setSearchResults([]);
+      }
+      searchDebounceRef.current = null;
+    }, 300);
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [token, searchQuery]);
+
+  useEffect(() => {
+    if (!token) return;
+    const wsUrl = `${getPresenceWsUrl()}?token=${encodeURIComponent(token)}`;
+    const ws = new WebSocket(wsUrl);
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'presence' && typeof data.userId === 'number') {
+          setOnlineUserIds((prev) => {
+            const next = new Set(prev);
+            if (data.online) next.add(data.userId);
+            else next.delete(data.userId);
+            return next;
+          });
+        }
+      } catch {}
+    };
+    return () => ws.close();
   }, [token]);
 
   useEffect(() => {
@@ -185,12 +240,16 @@ export default function MessengerApp() {
   }, [selectedUserId, messages]);
 
   useEffect(() => {
-    if (!token || users.length === 0) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages]);
+
+  useEffect(() => {
+    if (!token || conversations.length === 0) return;
 
     let cancelled = false;
 
     async function pollAllChats() {
-      for (const user of users) {
+      for (const user of conversations) {
         if (cancelled) return;
 
         const peerId = user.id;
@@ -282,7 +341,7 @@ export default function MessengerApp() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [token, users, selectedUserId, isMobile, addToast]);
+  }, [token, conversations, selectedUserId, isMobile, addToast]);
 
   async function sendMessage(event) {
     event.preventDefault();
@@ -298,6 +357,15 @@ export default function MessengerApp() {
 
       setMessages((prev) => [...prev, { ...created, senderName: currentUser?.fullName }]);
       setMessage('');
+
+      const peerInConversations = conversations.some((c) => c.id === selectedUserId);
+      if (!peerInConversations) {
+        const list = await apiRequest('/chat/conversations', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setConversations(list);
+        setSelectedUserFromSearch(null);
+      }
     } catch (err) {
       setError(err.message);
     }
@@ -336,78 +404,107 @@ export default function MessengerApp() {
             </button>
           </div>
 
-          <div style={{ padding: '16px 20px 8px', fontSize: 14, color: '#94a3b8' }}>Пользователи</div>
-          <div style={{ overflowY: 'auto', padding: '0 12px 12px' }}>
-            {users.map((user) => {
-              const active = selectedUserId === user.id;
-              const unread = unreadCounts[user.id] ?? 0;
-              const online = isUserOnline(user.lastSeen);
-              return (
-                <button
-                  key={user.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedUserId(user.id);
-                    if (isMobile) setMobileShowChat(true);
-                  }}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                    marginBottom: 10,
-                    borderRadius: 16,
-                    border: active ? '1px solid #3b82f6' : '1px solid #1e293b',
-                    background: active ? '#0f172a' : 'transparent',
-                    color: '#fff',
-                    padding: 12,
-                    cursor: 'pointer'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <img src={user.avatarUrl} alt={user.fullName} width="48" height="48" style={{ borderRadius: '999px', objectFit: 'cover', background: '#334155' }} />
-                    <div style={{ textAlign: 'left' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontWeight: 700 }}>{user.fullName}</span>
-                        {online ? (
-                          <span
-                            style={{
-                              width: 8,
-                              height: 8,
-                              borderRadius: 999,
-                              background: '#22c55e'
-                            }}
-                          />
-                        ) : null}
-                      </div>
-                      <div style={{ color: '#94a3b8', fontSize: 14 }}>
-                        @{user.username}
-                        {online ? ' · в сети' : ''}
+          <div style={{ padding: '12px 20px', borderBottom: '1px solid #1e293b' }}>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Поиск по имени или логину..."
+              style={{
+                width: '100%',
+                padding: '12px 14px',
+                borderRadius: 12,
+                border: '1px solid #334155',
+                background: '#0f172a',
+                color: '#fff',
+                fontSize: 14
+              }}
+            />
+          </div>
+          <div className="sidebar-scroll" style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
+            {sidebarList.length === 0 && !searchQuery.trim() ? (
+              <div style={{ padding: 16, color: '#64748b', fontSize: 14, textAlign: 'center' }}>
+                Нет диалогов. Введите имя или логин в поиске.
+              </div>
+            ) : sidebarList.length === 0 && searchQuery.trim() ? (
+              <div style={{ padding: 16, color: '#64748b', fontSize: 14, textAlign: 'center' }}>
+                Никого не найдено
+              </div>
+            ) : (
+              sidebarList.map((user) => {
+                const active = selectedUserId === user.id;
+                const unread = unreadCounts[user.id] ?? 0;
+                const online = isUserOnline(user.id);
+                const fromSearch = searchQuery.trim() && searchResults.some((r) => r.id === user.id);
+                return (
+                  <button
+                    key={user.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedUserId(user.id);
+                      if (fromSearch) setSelectedUserFromSearch(user);
+                      else setSelectedUserFromSearch(null);
+                      if (isMobile) setMobileShowChat(true);
+                    }}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      marginBottom: 10,
+                      borderRadius: 16,
+                      border: active ? '1px solid #3b82f6' : '1px solid #1e293b',
+                      background: active ? '#0f172a' : 'transparent',
+                      color: '#fff',
+                      padding: 12,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <img src={user.avatarUrl} alt={user.fullName} width="48" height="48" style={{ borderRadius: '999px', objectFit: 'cover', background: '#334155' }} />
+                      <div style={{ textAlign: 'left' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontWeight: 700 }}>{user.fullName}</span>
+                          {online ? (
+                            <span
+                              style={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: 999,
+                                background: '#22c55e'
+                              }}
+                            />
+                          ) : null}
+                        </div>
+                        <div style={{ color: '#94a3b8', fontSize: 14 }}>
+                          @{user.username}
+                          {online ? ' · в сети' : ''}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  {unread > 0 ? (
-                    <div
-                      style={{
-                        minWidth: 24,
-                        height: 24,
-                        borderRadius: 999,
-                        background: '#ef4444',
-                        color: '#fff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 12,
-                        fontWeight: 600
-                      }}
-                    >
-                      {unread > 9 ? '9+' : unread}
-                    </div>
-                  ) : null}
-                </button>
-              );
-            })}
+                    {unread > 0 ? (
+                      <div
+                        style={{
+                          minWidth: 24,
+                          height: 24,
+                          borderRadius: 999,
+                          background: '#ef4444',
+                          color: '#fff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 12,
+                          fontWeight: 600
+                        }}
+                      >
+                        {unread > 9 ? '9+' : unread}
+                      </div>
+                    ) : null}
+                  </button>
+                );
+              })
+            )}
           </div>
         </aside>
 
@@ -428,7 +525,7 @@ export default function MessengerApp() {
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 20, fontWeight: 700 }}>{selectedUser.fullName}</span>
-                    {isUserOnline(selectedUser.lastSeen) ? (
+                    {isUserOnline(selectedUser.id) ? (
                       <span
                         style={{
                           width: 10,
@@ -440,7 +537,7 @@ export default function MessengerApp() {
                     ) : null}
                   </div>
                   <div style={{ color: '#94a3b8' }}>
-                    {isUserOnline(selectedUser.lastSeen) ? 'в сети' : 'оффлайн'}
+                    {isUserOnline(selectedUser.id) ? 'в сети' : 'оффлайн'}
                   </div>
                 </div>
               </>
@@ -470,6 +567,7 @@ export default function MessengerApp() {
                 </div>
               );
             })}
+            <div ref={messagesEndRef} style={{ height: 0 }} aria-hidden />
           </div>
 
           <form onSubmit={sendMessage} style={{ padding: 20, borderTop: '1px solid #1e293b', display: 'flex', gap: 12 }}>

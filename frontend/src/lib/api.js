@@ -1,5 +1,10 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
+export function getPresenceWsUrl() {
+  const base = API_URL.replace(/^http/, 'ws').replace(/\/api\/?$/, '');
+  return `${base}/ws/presence`;
+}
+
 export async function apiRequest(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, {
     ...options,

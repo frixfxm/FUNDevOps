@@ -1,9 +1,11 @@
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import authRoutes from './routes/auth.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 import { env } from './config/env.js';
 import { pool } from './config/db.js';
+import { setupPresenceWebSocket } from './websocket/presence.js';
 
 const app = express();
 
@@ -27,6 +29,9 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ message: 'Internal server error' });
 });
 
-app.listen(env.port, () => {
+const server = http.createServer(app);
+setupPresenceWebSocket(server);
+
+server.listen(env.port, () => {
   console.log(`Backend started on http://localhost:${env.port}`);
 });
