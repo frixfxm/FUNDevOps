@@ -55,6 +55,7 @@ export default function MessengerApp() {
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
   const remoteAudioRef = useRef(null);
+  const remoteStreamRef = useRef(null);
   const ringtoneRef = useRef(null);
   const ringbackRef = useRef(null);
   const callTimeoutRef = useRef(null);
@@ -161,6 +162,16 @@ export default function MessengerApp() {
     }
   }
 
+  function attachRemoteStream(stream) {
+    const el = remoteAudioRef.current;
+    if (!el || !stream || stream.getAudioTracks().length === 0) return;
+    remoteStreamRef.current = stream;
+    el.srcObject = stream;
+    el.muted = false;
+    el.volume = 1;
+    el.play().catch(() => {});
+  }
+
   function stopCallSounds() {
     if (ringtoneRef.current) {
       ringtoneRef.current.pause();
@@ -189,6 +200,10 @@ export default function MessengerApp() {
     pendingIceRef.current = [];
     callTargetUserIdRef.current = null;
     inCallPeerRef.current = null;
+    remoteStreamRef.current = null;
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = null;
+    }
     setCallingUserId(null);
     setInCallWithUserId(null);
     setIncomingCallFrom(null);
@@ -209,12 +224,13 @@ export default function MessengerApp() {
       peerConnectionRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
       pc.ontrack = (e) => {
-        const el = remoteAudioRef.current;
-        if (!el) return;
+        if (e.track) e.track.enabled = true;
         const remoteStream = e.streams?.[0] || (e.track ? new MediaStream([e.track]) : null);
-        if (remoteStream) {
-          el.srcObject = remoteStream;
-          el.play().catch(() => {});
+        if (remoteStream) attachRemoteStream(remoteStream);
+      };
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected' && remoteStreamRef.current) {
+          attachRemoteStream(remoteStreamRef.current);
         }
       };
       pc.onicecandidate = (e) => {
@@ -264,12 +280,13 @@ export default function MessengerApp() {
       peerConnectionRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
       pc.ontrack = (e) => {
-        const el = remoteAudioRef.current;
-        if (!el) return;
+        if (e.track) e.track.enabled = true;
         const remoteStream = e.streams?.[0] || (e.track ? new MediaStream([e.track]) : null);
-        if (remoteStream) {
-          el.srcObject = remoteStream;
-          el.play().catch(() => {});
+        if (remoteStream) attachRemoteStream(remoteStream);
+      };
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected' && remoteStreamRef.current) {
+          attachRemoteStream(remoteStreamRef.current);
         }
       };
       pc.onicecandidate = (e) => {
