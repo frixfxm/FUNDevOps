@@ -9,7 +9,8 @@ import { setupPresenceWebSocket } from './websocket/presence.js';
 
 const app = express();
 
-app.use(cors({ origin: env.clientUrl, credentials: false }));
+const corsOrigin = env.clientUrl === '*' || !env.clientUrl ? true : env.clientUrl;
+app.use(cors({ origin: corsOrigin, credentials: false }));
 app.use(express.json());
 
 app.get('/api/health', async (_req, res) => {
@@ -32,6 +33,6 @@ app.use((error, _req, res, _next) => {
 const server = http.createServer(app);
 setupPresenceWebSocket(server);
 
-server.listen(env.port, () => {
-  console.log(`Backend started on http://localhost:${env.port}`);
+server.listen(env.port, '0.0.0.0', () => {
+  console.log(`Backend started on http://0.0.0.0:${env.port}`);
 });

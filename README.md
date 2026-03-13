@@ -105,7 +105,7 @@ docker compose build
 docker compose up -d
 ```
 
-Frontend будет на порту 3000, backend на 4000 (nginx проксирует на них).
+Frontend будет на порту 3000, backend на 4000 (nginx проксирует на них). При 502 проверь логи: `docker compose logs backend` — бэкенд должен слушать на `0.0.0.0:4000` и успешно подключаться к БД.
 
 ### 2. Конфиг nginx с HTTPS
 
