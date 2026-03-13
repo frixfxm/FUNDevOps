@@ -23,6 +23,9 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_URL: /api
+        NEXT_PUBLIC_TURN_SERVER: ${NEXT_PUBLIC_TURN_SERVER:-}
+        NEXT_PUBLIC_TURN_USERNAME: ${NEXT_PUBLIC_TURN_USERNAME:-}
+        NEXT_PUBLIC_TURN_CREDENTIAL: ${NEXT_PUBLIC_TURN_CREDENTIAL:-}
     container_name: frontend
     ports:
       - "3000:3000"

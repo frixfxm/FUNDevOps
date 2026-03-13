@@ -137,6 +137,10 @@ NEXT_PUBLIC_API_URL=https://ТВОЙ_ДОМЕН/api
 
 Пересобери frontend (`docker compose build frontend` и `docker compose up -d`), затем открой сайт в браузере по **https://**.
 
+### 4. TURN для звонков (если звука нет, ICE failed)
+
+Если звонок устанавливается, но собеседника не слышно (в chrome://webrtc-internals видно `iceConnectionState: failed`), нужен TURN-сервер. Инструкция по установке coturn на Ubuntu и настройке переменных — в **[docs/TURN-setup.md](docs/TURN-setup.md)**.
+
 ## Подсказка по Docker
 
 Тебе понадобятся 3 сервиса:

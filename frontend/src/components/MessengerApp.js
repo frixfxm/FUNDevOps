@@ -16,6 +16,17 @@ function formatTime(dateString) {
 
 const MOBILE_BREAKPOINT = 768;
 
+function getIceServers() {
+  const servers = [{ urls: 'stun:stun.l.google.com:19302' }];
+  const turnUrl = process.env.NEXT_PUBLIC_TURN_SERVER;
+  const turnUser = process.env.NEXT_PUBLIC_TURN_USERNAME;
+  const turnCred = process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
+  if (turnUrl && turnUser && turnCred) {
+    servers.push({ urls: turnUrl, username: turnUser, credential: turnCred });
+  }
+  return servers;
+}
+
 export default function MessengerApp() {
   const router = useRouter();
   const { addToast } = useToast();
@@ -220,7 +231,7 @@ export default function MessengerApp() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      const pc = new RTCPeerConnection({ iceServers: getIceServers() });
       peerConnectionRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
       pc.ontrack = (e) => {
@@ -276,7 +287,7 @@ export default function MessengerApp() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      const pc = new RTCPeerConnection({ iceServers: getIceServers() });
       peerConnectionRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
       pc.ontrack = (e) => {
