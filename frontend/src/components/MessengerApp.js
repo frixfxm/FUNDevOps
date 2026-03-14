@@ -64,6 +64,9 @@ export default function MessengerApp() {
   const [inCallWithUserId, setInCallWithUserId] = useState(null);
   const [hasRemoteVideoStream, setHasRemoteVideoStream] = useState(false);
   const [hasRemoteStream, setHasRemoteStream] = useState(false);
+  const [isVideoCall, setIsVideoCall] = useState(false);
+  const [incomingCallIsVideo, setIncomingCallIsVideo] = useState(false);
+  const [localVideoEnabled, setLocalVideoEnabled] = useState(true);
 
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
@@ -82,6 +85,7 @@ export default function MessengerApp() {
   const callingUserIdRef = useRef(null);
   const inCallWithUserIdRef = useRef(null);
   const incomingCallFromRef = useRef(null);
+  const isVideoCallRef = useRef(false);
 
   useEffect(() => {
     conversationsRef.current = conversations;
@@ -96,7 +100,19 @@ export default function MessengerApp() {
     callingUserIdRef.current = callingUserId;
     inCallWithUserIdRef.current = inCallWithUserId;
     incomingCallFromRef.current = incomingCallFrom;
-  }, [callingUserId, inCallWithUserId, incomingCallFrom]);
+    isVideoCallRef.current = isVideoCall;
+  }, [callingUserId, inCallWithUserId, incomingCallFrom, isVideoCall]);
+
+  useEffect(() => {
+    if (!(inCallWithUserId || callingUserId) || !isVideoCall) return;
+    const stream = localStreamRef.current;
+    const videoEl = localVideoRef.current;
+    if (stream && videoEl) {
+      videoEl.srcObject = stream;
+      videoEl.muted = true;
+      videoEl.play().catch(() => {});
+    }
+  }, [inCallWithUserId, callingUserId, isVideoCall]);
 
   const isUserOnline = useCallback((userId) => onlineUserIds.has(userId), [onlineUserIds]);
 
@@ -249,9 +265,12 @@ export default function MessengerApp() {
     setIncomingOfferSdp(null);
     setHasRemoteVideoStream(false);
     setHasRemoteStream(false);
+    setIsVideoCall(false);
+    setIncomingCallIsVideo(false);
+    setLocalVideoEnabled(true);
   }
 
-  async function startCall() {
+  async function startCall(video = true) {
     if (!selectedUser || !wsRef.current || wsRef.current.readyState !== 1) return;
     if (callingUserId || inCallWithUserId) return;
     if (!isUserOnline(selectedUser.id)) {
@@ -259,9 +278,14 @@ export default function MessengerApp() {
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user' } });
+      const mediaConstraints = video
+        ? { audio: true, video: { facingMode: 'user' } }
+        : { audio: true };
+      const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
       localStreamRef.current = stream;
-      attachLocalStreamToVideo(stream);
+      setLocalVideoEnabled(video);
+      setIsVideoCall(video);
+      if (video) attachLocalStreamToVideo(stream);
       const pc = new RTCPeerConnection({ iceServers: getIceServers() });
       peerConnectionRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -282,7 +306,7 @@ export default function MessengerApp() {
       };
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      wsRef.current.send(JSON.stringify({ type: 'call_offer', toUserId: selectedUser.id, sdp: offer }));
+      wsRef.current.send(JSON.stringify({ type: 'call_offer', toUserId: selectedUser.id, sdp: offer, isVideo: video }));
       callTargetUserIdRef.current = selectedUser.id;
       inCallPeerRef.current = { id: selectedUser.id, fullName: selectedUser.fullName };
       setCallingUserId(selectedUser.id);
@@ -312,13 +336,20 @@ export default function MessengerApp() {
   async function acceptCall() {
     if (!incomingCallFrom || !incomingOfferSdp || !wsRef.current || wsRef.current.readyState !== 1) return;
     const fromId = incomingCallFrom.id;
+    const isVideo = incomingCallIsVideo;
     stopCallSounds();
     setIncomingCallFrom(null);
     setIncomingOfferSdp(null);
+    setIncomingCallIsVideo(false);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user' } });
+      const mediaConstraints = isVideo
+        ? { audio: true, video: { facingMode: 'user' } }
+        : { audio: true };
+      const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
       localStreamRef.current = stream;
-      attachLocalStreamToVideo(stream);
+      setLocalVideoEnabled(isVideo);
+      setIsVideoCall(isVideo);
+      if (isVideo) attachLocalStreamToVideo(stream);
       const pc = new RTCPeerConnection({ iceServers: getIceServers() });
       peerConnectionRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -359,12 +390,23 @@ export default function MessengerApp() {
     stopCallSounds();
     setIncomingCallFrom(null);
     setIncomingOfferSdp(null);
+    setIncomingCallIsVideo(false);
   }
 
   function endCall() {
     if (!inCallWithUserId || !wsRef.current || wsRef.current.readyState !== 1) return;
     wsRef.current.send(JSON.stringify({ type: 'call_end', toUserId: inCallWithUserId }));
     cleanupCall();
+  }
+
+  function toggleLocalVideo() {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    const videoTracks = stream.getVideoTracks();
+    if (videoTracks.length === 0) return;
+    const next = !localVideoEnabled;
+    videoTracks.forEach((t) => { t.enabled = next; });
+    setLocalVideoEnabled(next);
   }
 
   function playNewMessageSound() {
@@ -493,6 +535,7 @@ export default function MessengerApp() {
           const caller = conv.find((c) => c.id === data.fromUserId) || search.find((r) => r.id === data.fromUserId) || { id: data.fromUserId, fullName: 'Пользователь', avatarUrl: '' };
           setIncomingCallFrom(caller);
           setIncomingOfferSdp(data.sdp);
+          setIncomingCallIsVideo(data.isVideo === true);
           const ring = new Audio('/sounds/zvonok.mp3');
           ring.loop = true;
           ring.play().catch(() => {});
@@ -837,7 +880,9 @@ export default function MessengerApp() {
             <div style={{ marginBottom: 20 }}>
               <img src={incomingCallFrom.avatarUrl || ''} alt="" width="80" height="80" style={{ borderRadius: '50%', objectFit: 'cover', background: '#334155' }} />
             </div>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Вам видеозвонок от {incomingCallFrom.fullName}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
+              Вам {incomingCallIsVideo ? 'видеозвонок' : 'звонок'} от {incomingCallFrom.fullName}
+            </div>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24 }}>
               <button type="button" onClick={acceptCall} className="call-modal-btn call-modal-accept" style={{ padding: '14px 28px', borderRadius: 14, border: 'none', background: '#22c55e', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Взять</button>
               <button type="button" onClick={rejectCall} className="call-modal-btn call-modal-reject" style={{ padding: '14px 28px', borderRadius: 14, border: '1px solid #475569', background: '#334155', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Сбросить</button>
@@ -1039,15 +1084,26 @@ export default function MessengerApp() {
                       </button>
                     </>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={startCall}
-                      className="call-btn call-btn-start"
-                      title="Видеозвонок"
-                      style={{ width: 40, height: 40, borderRadius: '50%', border: '1px solid #334155', background: '#0f172a', color: '#22c55e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => startCall(true)}
+                        className="call-btn call-btn-video"
+                        title="Видеозвонок"
+                        style={{ width: 40, height: 40, borderRadius: '50%', border: '1px solid #334155', background: '#0f172a', color: '#22c55e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => startCall(false)}
+                        className="call-btn call-btn-audio"
+                        title="Аудиозвонок"
+                        style={{ width: 40, height: 40, borderRadius: '50%', border: '1px solid #334155', background: '#0f172a', color: '#22c55e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
+                      </button>
+                    </>
                   )}
                 </div>
               </>
@@ -1056,7 +1112,7 @@ export default function MessengerApp() {
             )}
           </header>
 
-          {(inCallWithUserId || callingUserId) ? (
+          {(inCallWithUserId || callingUserId) && isVideoCall ? (
             <div
               className="video-call-view"
               style={{
@@ -1089,11 +1145,7 @@ export default function MessengerApp() {
                   </span>
                 </div>
               )}
-              <video
-                ref={localVideoRef}
-                muted
-                autoPlay
-                playsInline
+              <div
                 style={{
                   position: 'absolute',
                   bottom: 80,
@@ -1101,13 +1153,53 @@ export default function MessengerApp() {
                   width: 160,
                   height: 120,
                   borderRadius: 12,
-                  objectFit: 'cover',
                   border: '2px solid #334155',
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.4)'
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+                  overflow: 'hidden',
+                  background: '#1e293b'
                 }}
-                aria-label="Ваше видео"
-              />
-              <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 12 }}>
+              >
+                {localVideoEnabled ? (
+                  <video
+                    ref={localVideoRef}
+                    muted
+                    autoPlay
+                    playsInline
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    aria-label="Ваше видео"
+                  />
+                ) : (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: 12 }}>
+                    Камера выключена
+                  </div>
+                )}
+              </div>
+              <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 12, alignItems: 'center' }}>
+                {inCallWithUserId && (
+                  <button
+                    type="button"
+                    onClick={toggleLocalVideo}
+                    title={localVideoEnabled ? 'Выключить камеру' : 'Включить камеру'}
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: '50%',
+                      border: 'none',
+                      background: localVideoEnabled ? '#334155' : '#22c55e',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    {localVideoEnabled ? (
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34a2 2 0 0 1-1.41 1.91l-2.59.86" /><path d="M10 12v4h4" /><path d="M22 2L2 22" /></svg>
+                    ) : (
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>
+                    )}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={inCallWithUserId ? endCall : cancelCall}

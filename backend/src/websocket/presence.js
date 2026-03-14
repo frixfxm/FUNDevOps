@@ -60,7 +60,8 @@ export function setupPresenceWebSocket(server) {
             sendToUser(data.toUserId, {
               type: 'call_offer',
               fromUserId: userId,
-              sdp: data.sdp
+              sdp: data.sdp,
+              isVideo: data.isVideo === true
             });
           } else if (data.type === 'call_answer' && typeof data.toUserId === 'number' && data.sdp) {
             sendToUser(data.toUserId, {
