@@ -4,6 +4,32 @@ import { env } from '../config/env.js';
 
 const onlineUsers = new Map();
 
+const groupCallRooms = new Map();
+
+function generateRoomId() {
+  return 'room_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+}
+
+function removeUserFromAllRooms(userId) {
+  for (const [roomId, room] of groupCallRooms.entries()) {
+    if (room.joined.has(userId)) {
+      room.joined.delete(userId);
+      for (const uid of room.joined) {
+        if (uid !== userId) {
+          const peerSet = onlineUsers.get(uid);
+          if (peerSet) {
+            const payload = JSON.stringify({ type: 'group_call_participant_left', roomId, userId });
+            for (const peerWs of peerSet) {
+              if (peerWs.readyState === 1) peerWs.send(payload);
+            }
+          }
+        }
+      }
+      if (room.joined.size === 0) groupCallRooms.delete(roomId);
+    }
+  }
+}
+
 function broadcastPresence(userId, online) {
   const payload = JSON.stringify({ type: 'presence', userId, online });
   for (const set of onlineUsers.values()) {
@@ -79,6 +105,59 @@ export function setupPresenceWebSocket(server) {
               fromUserId: userId,
               candidate: data.candidate
             });
+          } else if (data.type === 'group_call_create' && Array.isArray(data.participantIds)) {
+            const participantIds = data.participantIds.filter((id) => typeof id === 'number' && id !== userId);
+            const roomId = generateRoomId();
+            const joined = new Set([userId]);
+            groupCallRooms.set(roomId, {
+              creatorId: userId,
+              participantIds: [...new Set(participantIds)],
+              joined
+            });
+            if (ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'group_call_created', roomId, participantIds }));
+            }
+            for (const pid of participantIds) {
+              sendToUser(pid, { type: 'group_call_invite', roomId, fromUserId: userId, isVideo: data.isVideo === true });
+            }
+          } else if (data.type === 'group_call_join' && typeof data.roomId === 'string') {
+            const room = groupCallRooms.get(data.roomId);
+            if (room && !room.joined.has(userId)) {
+              room.joined.add(userId);
+              const participants = Array.from(room.joined).filter((id) => id !== userId);
+              if (ws.readyState === 1) {
+                ws.send(JSON.stringify({ type: 'group_call_room_state', roomId: data.roomId, participants }));
+              }
+              for (const uid of room.joined) {
+                if (uid !== userId) {
+                  sendToUser(uid, { type: 'group_call_participant_joined', roomId: data.roomId, userId });
+                }
+              }
+            }
+          } else if (data.type === 'group_call_leave' && typeof data.roomId === 'string') {
+            const room = groupCallRooms.get(data.roomId);
+            if (room && room.joined.has(userId)) {
+              room.joined.delete(userId);
+              for (const uid of room.joined) {
+                sendToUser(uid, { type: 'group_call_participant_left', roomId: data.roomId, userId });
+              }
+              if (room.joined.size === 0) groupCallRooms.delete(data.roomId);
+            }
+          } else if (data.type === 'group_call_offer' && typeof data.roomId === 'string' && typeof data.toUserId === 'number' && data.sdp) {
+            const room = groupCallRooms.get(data.roomId);
+            if (room && room.joined.has(userId) && room.joined.has(data.toUserId)) {
+              sendToUser(data.toUserId, { type: 'group_call_offer', roomId: data.roomId, fromUserId: userId, sdp: data.sdp, isVideo: data.isVideo === true });
+            }
+          } else if (data.type === 'group_call_answer' && typeof data.roomId === 'string' && typeof data.toUserId === 'number' && data.sdp) {
+            const room = groupCallRooms.get(data.roomId);
+            if (room && room.joined.has(userId) && room.joined.has(data.toUserId)) {
+              sendToUser(data.toUserId, { type: 'group_call_answer', roomId: data.roomId, fromUserId: userId, sdp: data.sdp });
+            }
+          } else if (data.type === 'group_call_ice' && typeof data.roomId === 'string' && typeof data.toUserId === 'number' && data.candidate != null) {
+            const room = groupCallRooms.get(data.roomId);
+            if (room && room.joined.has(userId) && room.joined.has(data.toUserId)) {
+              sendToUser(data.toUserId, { type: 'group_call_ice', roomId: data.roomId, fromUserId: userId, candidate: data.candidate });
+            }
           }
           return;
         }
@@ -94,6 +173,7 @@ export function setupPresenceWebSocket(server) {
     function handleClose() {
       if (authTimeoutRef) clearTimeout(authTimeoutRef);
       if (userId == null) return;
+      removeUserFromAllRooms(userId);
       const set = onlineUsers.get(userId);
       if (set) {
         set.delete(ws);

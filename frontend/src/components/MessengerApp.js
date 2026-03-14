@@ -5,6 +5,61 @@ import { useRouter } from 'next/navigation';
 import { apiRequest, getPresenceWsUrl } from '@/lib/api';
 import { useToast } from '@/components/ToastProvider';
 
+function GroupCallParticipantTile({ participant: p, getAvatarUrl }) {
+  const videoRef = useRef(null);
+  const audioRef = useRef(null);
+  useEffect(() => {
+    if (!p.stream) return;
+    if (videoRef.current) {
+      videoRef.current.srcObject = p.stream;
+      videoRef.current.muted = false;
+      videoRef.current.play().catch(() => {});
+    }
+    if (audioRef.current && p.stream.getAudioTracks().length > 0) {
+      audioRef.current.srcObject = p.stream;
+      audioRef.current.play().catch(() => {});
+    }
+  }, [p.stream]);
+  return (
+    <div
+      style={{
+        aspectRatio: '4/3',
+        borderRadius: 12,
+        border: '2px solid #334155',
+        overflow: 'hidden',
+        background: '#1e293b',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative'
+      }}
+    >
+      {p.stream ? (
+        <>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            aria-label={`Видео ${p.fullName}`}
+          />
+          {p.stream.getAudioTracks().length > 0 && (
+            <audio ref={audioRef} autoPlay playsInline style={{ position: 'absolute', width: 0, height: 0, opacity: 0 }} aria-hidden />
+          )}
+        </>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', gap: 8 }}>
+          <img src={getAvatarUrl(p.avatarUrl, p.username)} alt="" width="64" height="64" style={{ borderRadius: '50%', objectFit: 'cover', background: '#334155' }} onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/64x64?text=?'; }} />
+          <span style={{ fontSize: 14 }}>{p.fullName}</span>
+          <span style={{ fontSize: 12 }}>Подключение...</span>
+        </div>
+      )}
+      <div style={{ position: 'absolute', bottom: 8, left: 8, right: 8, textAlign: 'center', fontSize: 12, color: '#cbd5e1' }}>{p.fullName}</div>
+    </div>
+  );
+}
+
 function formatTime(dateString) {
   return new Date(dateString).toLocaleString('ru-RU', {
     day: '2-digit',
@@ -79,6 +134,17 @@ export default function MessengerApp() {
   const [incomingCallIsVideo, setIncomingCallIsVideo] = useState(false);
   const [localVideoEnabled, setLocalVideoEnabled] = useState(true);
 
+  const [groupCallRoomId, setGroupCallRoomId] = useState(null);
+  const [groupCallParticipants, setGroupCallParticipants] = useState([]);
+  const [groupCallIncomingInvite, setGroupCallIncomingInvite] = useState(null);
+  const [isGroupCallCreator, setIsGroupCallCreator] = useState(false);
+  const [showGroupCallModal, setShowGroupCallModal] = useState(false);
+  const [groupCallSelectedIds, setGroupCallSelectedIds] = useState([]);
+  const groupCallPeersRef = useRef(new Map());
+  const groupCallRemoteStreamsRef = useRef(new Map());
+  const groupCallRoomIdRef = useRef(null);
+  const groupCallRingbackRef = useRef(null);
+
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
   const localVideoRef = useRef(null);
@@ -104,7 +170,14 @@ export default function MessengerApp() {
   }, [conversations, searchResults]);
 
   useEffect(() => {
-    return () => cleanupCall();
+    groupCallRoomIdRef.current = groupCallRoomId;
+  }, [groupCallRoomId]);
+
+  useEffect(() => {
+    return () => {
+      cleanupCall();
+      cleanupGroupCall();
+    };
   }, []);
 
   useEffect(() => {
@@ -289,9 +362,225 @@ export default function MessengerApp() {
     setLocalVideoEnabled(true);
   }
 
+  function cleanupGroupCall() {
+    if (groupCallRingbackRef.current) {
+      groupCallRingbackRef.current.pause();
+      groupCallRingbackRef.current = null;
+    }
+    groupCallPeersRef.current.forEach((peer) => {
+      if (peer.pc) peer.pc.close();
+    });
+    groupCallPeersRef.current.clear();
+    groupCallRemoteStreamsRef.current.clear();
+    groupCallRoomIdRef.current = null;
+    setGroupCallRoomId(null);
+    setGroupCallParticipants([]);
+    setGroupCallIncomingInvite(null);
+    setIsGroupCallCreator(false);
+  }
+
+  function addGroupCallParticipant(userId, info = {}) {
+    setGroupCallParticipants((prev) => {
+      if (prev.some((p) => p.userId === userId)) return prev;
+      return [...prev, { userId, fullName: info.fullName || 'Участник', avatarUrl: info.avatarUrl, username: info.username, stream: null, connectionState: 'new' }];
+    });
+  }
+
+  function updateGroupCallParticipantStream(userId, stream) {
+    setGroupCallParticipants((prev) =>
+      prev.map((p) => (p.userId === userId ? { ...p, stream } : p))
+    );
+    groupCallRemoteStreamsRef.current.set(userId, stream);
+  }
+
+  function removeGroupCallParticipant(userId) {
+    const peer = groupCallPeersRef.current.get(userId);
+    if (peer?.pc) peer.pc.close();
+    groupCallPeersRef.current.delete(userId);
+    groupCallRemoteStreamsRef.current.delete(userId);
+    setGroupCallParticipants((prev) => prev.filter((p) => p.userId !== userId));
+  }
+
+  function resolveUserInfo(userId) {
+    const conv = conversationsRef.current || [];
+    const search = searchResultsRef.current || [];
+    const u = conv.find((c) => c.id === userId) || search.find((r) => r.id === userId);
+    return u ? { fullName: u.fullName, avatarUrl: u.avatarUrl, username: u.username } : {};
+  }
+
+  async function createGroupCall(participantIds, isVideo = true) {
+    if (!wsRef.current || wsRef.current.readyState !== 1 || !currentUser) return;
+    if (callingUserId || inCallWithUserId || groupCallRoomIdRef.current) return;
+    const ids = participantIds.filter((id) => id !== currentUser.id && isUserOnline(id));
+    if (ids.length === 0) {
+      addToast({ title: 'Выберите хотя бы одного участника в сети' });
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(
+        isVideo ? { audio: true, video: { facingMode: 'user' } } : { audio: true }
+      );
+      localStreamRef.current = stream;
+      setLocalVideoEnabled(isVideo);
+      if (isVideo) attachLocalStreamToVideo(stream);
+      wsRef.current.send(JSON.stringify({ type: 'group_call_create', participantIds: ids, isVideo }));
+      setShowGroupCallModal(false);
+      setGroupCallSelectedIds([]);
+      const ringback = new Audio('/sounds/gudki.mp3');
+      ringback.loop = true;
+      ringback.play().catch(() => {});
+      groupCallRingbackRef.current = ringback;
+    } catch (err) {
+      addToast({ title: 'Не удалось начать групповой звонок', description: err.message });
+    }
+  }
+
+  async function joinGroupCall() {
+    if (!groupCallIncomingInvite || !wsRef.current || wsRef.current.readyState !== 1 || !currentUser) return;
+    const { roomId, isVideo } = groupCallIncomingInvite;
+    setGroupCallIncomingInvite(null);
+    stopCallSounds();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(
+        isVideo ? { audio: true, video: { facingMode: 'user' } } : { audio: true }
+      );
+      localStreamRef.current = stream;
+      setLocalVideoEnabled(isVideo);
+      if (isVideo) attachLocalStreamToVideo(stream);
+      if (groupCallRingbackRef.current) {
+        groupCallRingbackRef.current.pause();
+        groupCallRingbackRef.current = null;
+      }
+      wsRef.current.send(JSON.stringify({ type: 'group_call_join', roomId }));
+      setGroupCallRoomId(roomId);
+      setIsGroupCallCreator(false);
+    } catch (err) {
+      addToast({ title: 'Не удалось присоединиться', description: err.message });
+    }
+  }
+
+  function rejectGroupCallInvite() {
+    setGroupCallIncomingInvite(null);
+  }
+
+  function leaveGroupCall() {
+    const roomId = groupCallRoomIdRef.current;
+    if (roomId && wsRef.current?.readyState === 1) {
+      wsRef.current.send(JSON.stringify({ type: 'group_call_leave', roomId }));
+    }
+    if (localStreamRef.current && groupCallRoomIdRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+    }
+    cleanupGroupCall();
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+  }
+
+  async function establishGroupCallPeer(remoteUserId, isOfferer) {
+    const myId = currentUser?.id;
+    if (!myId || !localStreamRef.current || !wsRef.current || wsRef.current.readyState !== 1) return;
+    if (groupCallPeersRef.current.has(remoteUserId)) return;
+    if (!isOfferer) return;
+    const pc = new RTCPeerConnection({ iceServers: getIceServers() });
+    localStreamRef.current.getTracks().forEach((track) => pc.addTrack(track, localStreamRef.current));
+    const pendingIce = [];
+    groupCallPeersRef.current.set(remoteUserId, { pc, pendingIce });
+    addGroupCallParticipant(remoteUserId, resolveUserInfo(remoteUserId));
+    pc.ontrack = (e) => {
+      const stream = e.streams?.[0] || (e.track ? new MediaStream([e.track]) : null);
+      if (stream) updateGroupCallParticipantStream(remoteUserId, stream);
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        removeGroupCallParticipant(remoteUserId);
+      }
+    };
+    pc.onicecandidate = (e) => {
+      if (e.candidate && wsRef.current?.readyState === 1 && groupCallRoomIdRef.current) {
+        wsRef.current.send(JSON.stringify({
+          type: 'group_call_ice',
+          roomId: groupCallRoomIdRef.current,
+          toUserId: remoteUserId,
+          candidate: e.candidate
+        }));
+      }
+    };
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    wsRef.current.send(JSON.stringify({
+      type: 'group_call_offer',
+      roomId: groupCallRoomIdRef.current,
+      toUserId: remoteUserId,
+      sdp: offer,
+      isVideo: localVideoEnabled
+    }));
+  }
+
+  async function handleGroupCallOffer(fromUserId, sdp) {
+    const myId = currentUser?.id;
+    if (!myId || !localStreamRef.current || !wsRef.current || wsRef.current.readyState !== 1) return;
+    const existing = groupCallPeersRef.current.get(fromUserId);
+    if (existing?.pc) return;
+    const pendingIce = existing?.pendingIce || [];
+    const pc = new RTCPeerConnection({ iceServers: getIceServers() });
+    localStreamRef.current.getTracks().forEach((track) => pc.addTrack(track, localStreamRef.current));
+    groupCallPeersRef.current.set(fromUserId, { pc, pendingIce: [] });
+    addGroupCallParticipant(fromUserId, resolveUserInfo(fromUserId));
+    pc.ontrack = (e) => {
+      const stream = e.streams?.[0] || (e.track ? new MediaStream([e.track]) : null);
+      if (stream) updateGroupCallParticipantStream(fromUserId, stream);
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        removeGroupCallParticipant(fromUserId);
+      }
+    };
+    pc.onicecandidate = (e) => {
+      if (e.candidate && wsRef.current?.readyState === 1 && groupCallRoomIdRef.current) {
+        wsRef.current.send(JSON.stringify({
+          type: 'group_call_ice',
+          roomId: groupCallRoomIdRef.current,
+          toUserId: fromUserId,
+          candidate: e.candidate
+        }));
+      }
+    };
+    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    wsRef.current.send(JSON.stringify({ type: 'group_call_answer', roomId: groupCallRoomIdRef.current, toUserId: fromUserId, sdp: answer }));
+    for (const c of pendingIce) {
+      pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+    }
+  }
+
+  async function handleGroupCallAnswer(fromUserId, sdp) {
+    const peer = groupCallPeersRef.current.get(fromUserId);
+    if (!peer?.pc) return;
+    await peer.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    if (peer.pendingIce?.length) {
+      for (const c of peer.pendingIce) {
+        peer.pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+      }
+      peer.pendingIce = [];
+    }
+  }
+
+  function handleGroupCallIce(fromUserId, candidate) {
+    const peer = groupCallPeersRef.current.get(fromUserId);
+    if (peer?.pc) {
+      peer.pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+    } else {
+      const p = groupCallPeersRef.current.get(fromUserId) || { pc: null, pendingIce: [] };
+      p.pendingIce = p.pendingIce || [];
+      p.pendingIce.push(candidate);
+      groupCallPeersRef.current.set(fromUserId, p);
+    }
+  }
+
   async function startCall(video = true) {
     if (!selectedUser || !wsRef.current || wsRef.current.readyState !== 1) return;
-    if (callingUserId || inCallWithUserId) return;
+    if (callingUserId || inCallWithUserId || groupCallRoomIdRef.current) return;
     if (!isUserOnline(selectedUser.id)) {
       addToast({ title: 'Пользователь не в сети' });
       return;
@@ -549,7 +838,7 @@ export default function MessengerApp() {
           }, 3000);
         }
         if (data.type === 'call_offer' && typeof data.fromUserId === 'number' && data.sdp) {
-          if (inCallWithUserIdRef.current || callingUserIdRef.current) return;
+          if (inCallWithUserIdRef.current || callingUserIdRef.current || groupCallRoomIdRef.current) return;
           const conv = conversationsRef.current || [];
           const search = searchResultsRef.current || [];
           const caller = conv.find((c) => c.id === data.fromUserId) || search.find((r) => r.id === data.fromUserId) || { id: data.fromUserId, fullName: 'Пользователь', avatarUrl: '' };
@@ -615,6 +904,57 @@ export default function MessengerApp() {
           } else {
             pendingIceRef.current.push(data.candidate);
           }
+        }
+        if (data.type === 'group_call_created' && typeof data.roomId === 'string') {
+          if (groupCallRingbackRef.current) {
+            groupCallRingbackRef.current.pause();
+            groupCallRingbackRef.current = null;
+          }
+          groupCallRoomIdRef.current = data.roomId;
+          setGroupCallRoomId(data.roomId);
+          setIsGroupCallCreator(true);
+        }
+        if (data.type === 'group_call_invite' && typeof data.roomId === 'string' && typeof data.fromUserId === 'number') {
+          if (inCallWithUserIdRef.current || callingUserIdRef.current || groupCallRoomIdRef.current) return;
+          setGroupCallIncomingInvite({ roomId: data.roomId, fromUserId: data.fromUserId, isVideo: data.isVideo === true });
+          const ring = new Audio('/sounds/zvonok.mp3');
+          ring.loop = true;
+          ring.play().catch(() => {});
+          ringtoneRef.current = ring;
+        }
+        if (data.type === 'group_call_room_state' && typeof data.roomId === 'string' && Array.isArray(data.participants)) {
+          groupCallRoomIdRef.current = data.roomId;
+          setGroupCallRoomId(data.roomId);
+          const myId = currentUser?.id;
+          if (typeof myId !== 'number') return;
+          for (const pid of data.participants) {
+            const isOfferer = myId < pid;
+            establishGroupCallPeer(pid, isOfferer);
+          }
+        }
+        if (data.type === 'group_call_participant_joined' && typeof data.roomId === 'string' && typeof data.userId === 'number') {
+          if (data.roomId !== groupCallRoomIdRef.current) return;
+          const myId = currentUser?.id;
+          if (typeof myId !== 'number') return;
+          const isOfferer = myId < data.userId;
+          establishGroupCallPeer(data.userId, isOfferer);
+        }
+        if (data.type === 'group_call_participant_left' && typeof data.roomId === 'string' && typeof data.userId === 'number') {
+          if (data.roomId === groupCallRoomIdRef.current) {
+            removeGroupCallParticipant(data.userId);
+          }
+        }
+        if (data.type === 'group_call_offer' && typeof data.roomId === 'string' && typeof data.fromUserId === 'number' && data.sdp) {
+          if (data.roomId !== groupCallRoomIdRef.current) return;
+          handleGroupCallOffer(data.fromUserId, data.sdp);
+        }
+        if (data.type === 'group_call_answer' && typeof data.roomId === 'string' && typeof data.fromUserId === 'number' && data.sdp) {
+          if (data.roomId !== groupCallRoomIdRef.current) return;
+          handleGroupCallAnswer(data.fromUserId, data.sdp);
+        }
+        if (data.type === 'group_call_ice' && typeof data.roomId === 'string' && typeof data.fromUserId === 'number' && data.candidate != null) {
+          if (data.roomId !== groupCallRoomIdRef.current) return;
+          handleGroupCallIce(data.fromUserId, data.candidate);
         }
       } catch {}
     };
@@ -915,6 +1255,85 @@ export default function MessengerApp() {
         </div>
       )}
 
+      {showGroupCallModal && (
+        <div
+          className="incoming-call-overlay"
+          style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(2,6,23,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+          onClick={(e) => e.target === e.currentTarget && setShowGroupCallModal(false)}
+        >
+          <div
+            style={{ background: 'rgba(15,23,42,0.95)', borderRadius: 20, padding: 24, border: '1px solid #1e293b', maxWidth: 400, width: '100%', maxHeight: '80vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Групповой звонок</div>
+            <div style={{ flex: 1, overflowY: 'auto', marginBottom: 16 }}>
+              {sidebarList.length === 0 ? (
+                <div style={{ color: '#64748b', fontSize: 14 }}>Нет контактов для выбора</div>
+              ) : (
+                sidebarList.map((user) => {
+                  const checked = groupCallSelectedIds.includes(user.id);
+                  const online = isUserOnline(user.id);
+                  return (
+                    <label
+                      key={user.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: '10px 12px',
+                        borderRadius: 12,
+                        background: checked ? 'rgba(37,99,235,0.15)' : 'transparent',
+                        cursor: 'pointer',
+                        marginBottom: 4
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          setGroupCallSelectedIds((prev) =>
+                            prev.includes(user.id) ? prev.filter((id) => id !== user.id) : [...prev, user.id]
+                          );
+                        }}
+                        style={{ width: 18, height: 18 }}
+                      />
+                      <img src={getAvatarUrl(user.avatarUrl, user.username)} alt="" width="40" height="40" style={{ borderRadius: '50%', objectFit: 'cover', background: '#334155' }} onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/40x40?text=?'; }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600 }}>{user.fullName}</div>
+                        <div style={{ fontSize: 12, color: '#94a3b8' }}>{online ? 'в сети' : 'оффлайн'} · @{user.username}</div>
+                      </div>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <button type="button" onClick={() => { setShowGroupCallModal(false); setGroupCallSelectedIds([]); }} style={{ padding: '10px 20px', borderRadius: 14, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 14 }}>Отмена</button>
+              <button type="button" onClick={() => createGroupCall(groupCallSelectedIds, true)} disabled={groupCallSelectedIds.length === 0} style={{ padding: '10px 20px', borderRadius: 14, border: 'none', background: groupCallSelectedIds.length === 0 ? '#334155' : '#2563eb', color: '#fff', cursor: groupCallSelectedIds.length === 0 ? 'default' : 'pointer', fontSize: 14, fontWeight: 600 }}>Начать звонок</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {groupCallIncomingInvite && (
+        <div
+          className="incoming-call-overlay"
+          style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(2,6,23,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+          onClick={(e) => e.target === e.currentTarget && rejectGroupCallInvite()}
+        >
+          <div style={{ background: 'rgba(15,23,42,0.95)', borderRadius: 20, padding: 32, border: '1px solid #1e293b', maxWidth: 360, width: '100%', textAlign: 'center', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Групповой {groupCallIncomingInvite.isVideo ? 'видео' : 'аудио'}звонок</div>
+            <div style={{ fontSize: 14, color: '#94a3b8', marginBottom: 24 }}>
+              Приглашение в звонок от {(conversations.find((c) => c.id === groupCallIncomingInvite.fromUserId) || searchResults.find((r) => r.id === groupCallIncomingInvite.fromUserId))?.fullName || 'Пользователя'}
+            </div>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button type="button" onClick={joinGroupCall} className="call-modal-btn call-modal-accept" style={{ padding: '14px 28px', borderRadius: 14, border: '1px solid #16a34a', background: '#22c55e', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Взять</button>
+              <button type="button" onClick={() => { stopCallSounds(); setGroupCallIncomingInvite(null); }} className="call-modal-btn call-modal-reject" style={{ padding: '14px 28px', borderRadius: 14, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Сбросить</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {incomingCallFrom && (
         <div className="incoming-call-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(2,6,23,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={(e) => e.target === e.currentTarget && rejectCall()}>
           <div className="incoming-call-modal" style={{ background: 'rgba(15,23,42,0.95)', borderRadius: 20, padding: 32, border: '1px solid #1e293b', maxWidth: 360, width: '100%', textAlign: 'center', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }} onClick={(e) => e.stopPropagation()}>
@@ -955,7 +1374,29 @@ export default function MessengerApp() {
             </button>
           </div>
 
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid #1e293b' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setShowGroupCallModal(true)}
+              disabled={!!(callingUserId || inCallWithUserId || groupCallRoomId)}
+              style={{
+                padding: '10px 14px',
+                borderRadius: 14,
+                border: '1px solid #334155',
+                background: groupCallRoomId ? '#334155' : '#0f172a',
+                color: '#94a3b8',
+                cursor: groupCallRoomId ? 'default' : 'pointer',
+                fontSize: 14,
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+              Групповой звонок
+            </button>
             <input
               type="text"
               value={searchQuery}
@@ -1061,6 +1502,121 @@ export default function MessengerApp() {
         </aside>
 
         <section className="messenger-chat">
+          {groupCallRoomId ? (
+            <div
+              className="video-call-view"
+              style={{
+                flex: 1,
+                position: 'relative',
+                background: 'radial-gradient(ellipse at 50% 50%, rgba(15,23,42,0.95), #020617)',
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden'
+              }}
+            >
+              <div style={{ padding: 12, borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 16, fontWeight: 700 }}>Групповой звонок</span>
+                <button
+                  type="button"
+                  onClick={leaveGroupCall}
+                  style={{ padding: '8px 16px', borderRadius: 14, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
+                >
+                  Завершить
+                </button>
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                  gap: 12,
+                  padding: 16,
+                  overflow: 'auto',
+                  alignContent: 'start'
+                }}
+              >
+                <div
+                  style={{
+                    position: 'relative',
+                    aspectRatio: '4/3',
+                    borderRadius: 12,
+                    border: '2px solid #334155',
+                    overflow: 'hidden',
+                    background: '#1e293b',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  {localVideoEnabled && localStreamRef.current ? (
+                    <video
+                      ref={localVideoRef}
+                      muted
+                      autoPlay
+                      playsInline
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      aria-label="Ваше видео"
+                    />
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', gap: 8 }}>
+                      <span style={{ fontSize: 14 }}>Вы</span>
+                      {!localVideoEnabled && <span style={{ fontSize: 12 }}>Камера выключена</span>}
+                    </div>
+                  )}
+                  <div style={{ position: 'absolute', bottom: 8, left: 8, right: 8, textAlign: 'center', fontSize: 12, color: '#cbd5e1' }}>Вы</div>
+                </div>
+                {groupCallParticipants.map((p) => (
+                  <GroupCallParticipantTile key={p.userId} participant={p} getAvatarUrl={getAvatarUrl} />
+                ))}
+              </div>
+              <div style={{ padding: 16, display: 'flex', gap: 12, justifyContent: 'center', borderTop: '1px solid #1e293b' }}>
+                <button
+                  type="button"
+                  onClick={toggleLocalVideo}
+                  title={localVideoEnabled ? 'Выключить камеру' : 'Включить камеру'}
+                  style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: localVideoEnabled ? '#334155' : '#22c55e',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  {localVideoEnabled ? (
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34a2 2 0 0 1-1.41 1.91l-2.59.86" /><path d="M10 12v4h4" /><path d="M22 2L2 22" /></svg>
+                  ) : (
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={leaveGroupCall}
+                  style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: '#ef4444',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
           <header className="messenger-chat-header" style={{ padding: 16, borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 12 }}>
             {isMobile && (
               <button
@@ -1321,6 +1877,8 @@ export default function MessengerApp() {
               Отправить
             </button>
           </form>
+            </>
+          )}
             </>
           )}
         </section>
