@@ -144,6 +144,11 @@ export function setupPresenceWebSocket(server) {
                 }
               });
             }
+          } else if (data.type === 'group_call_reject' && typeof data.roomId === 'string') {
+            const room = groupCallRooms.get(data.roomId);
+            if (room && room.creatorId) {
+              sendToUser(room.creatorId, { type: 'group_call_participant_declined', roomId: data.roomId, userId });
+            }
           } else if (data.type === 'group_call_leave' && typeof data.roomId === 'string') {
             const room = groupCallRooms.get(data.roomId);
             if (room && room.joined.has(userId)) {

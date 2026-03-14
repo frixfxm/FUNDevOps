@@ -479,6 +479,10 @@ export default function MessengerApp() {
   }
 
   function rejectGroupCallInvite() {
+    if (groupCallIncomingInvite?.roomId && wsRef.current?.readyState === 1) {
+      wsRef.current.send(JSON.stringify({ type: 'group_call_reject', roomId: groupCallIncomingInvite.roomId }));
+    }
+    stopCallSounds();
     setGroupCallIncomingInvite(null);
   }
 
@@ -510,7 +514,7 @@ export default function MessengerApp() {
       if (stream) updateGroupCallParticipantStream(remoteUserId, stream);
     };
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
         removeGroupCallParticipant(remoteUserId);
       }
     };
@@ -550,7 +554,7 @@ export default function MessengerApp() {
       if (stream) updateGroupCallParticipantStream(fromUserId, stream);
     };
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
         removeGroupCallParticipant(fromUserId);
       }
     };
@@ -988,6 +992,14 @@ export default function MessengerApp() {
             removeGroupCallParticipant(data.userId);
           }
         }
+        if (data.type === 'group_call_participant_declined' && typeof data.roomId === 'string' && typeof data.userId === 'number') {
+          if (data.roomId !== groupCallRoomIdRef.current) return;
+          const conv = conversationsRef.current || [];
+          const search = searchResultsRef.current || [];
+          const user = conv.find((c) => c.id === data.userId) || search.find((r) => r.id === data.userId);
+          const name = user?.fullName || 'Участник';
+          addToast({ title: `${name} отклонил приглашение в звонок` });
+        }
         if (data.type === 'group_call_offer' && typeof data.roomId === 'string' && typeof data.fromUserId === 'number' && data.sdp) {
           if (data.roomId !== groupCallRoomIdRef.current) return;
           const fromUserId = data.fromUserId;
@@ -1399,7 +1411,7 @@ export default function MessengerApp() {
             </div>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
               <button type="button" onClick={joinGroupCall} className="call-modal-btn call-modal-accept" style={{ padding: '14px 28px', borderRadius: 14, border: '1px solid #16a34a', background: '#22c55e', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Взять</button>
-              <button type="button" onClick={() => { stopCallSounds(); setGroupCallIncomingInvite(null); }} className="call-modal-btn call-modal-reject" style={{ padding: '14px 28px', borderRadius: 14, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Сбросить</button>
+              <button type="button" onClick={rejectGroupCallInvite} className="call-modal-btn call-modal-reject" style={{ padding: '14px 28px', borderRadius: 14, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Сбросить</button>
             </div>
           </div>
         </div>

@@ -49,7 +49,27 @@
 
 | Файл | Изменение |
 |------|-----------|
-| `backend/src/websocket/presence.js` | Рассылка `group_call_invite` с задержкой 80 ms между участниками; рассылка `group_call_participant_joined` с задержкой 50 ms между получателями. |
-| `frontend/src/components/MessengerApp.js` | Очередь обработки офферов (`groupCallOfferQueueRef`), сброс очереди в `cleanupGroupCall`; новая формула колонок сетки для 1–4 участников (2 колонки для 3 и 4). |
+| `backend/src/websocket/presence.js` | Рассылка `group_call_invite` с задержкой 80 ms; рассылка `group_call_participant_joined` с задержкой 50 ms; обработка `group_call_reject` и уведомление создателя (`group_call_participant_declined`). |
+| `frontend/src/components/MessengerApp.js` | Очередь офферов (`groupCallOfferQueueRef`); формула колонок 2 для 3–4 участников; при сбросе — отправка `group_call_reject`, тост создателю при отклонении; удаление участника только при `failed`/`closed`, не при `disconnected`. |
 
 После этих правок приглашения должны стабильно доходить до всех приглашённых, третий участник должен корректно слышать и видеть первых двух (и наоборот), а при трёх участниках отображаются два прямоугольника сверху и один снизу.
+
+---
+
+## Дополнительные правки (сброс и стабильность участников)
+
+### 4. Полное завершение сессии при сбросе звонка
+
+**Проблема:** При нажатии «Сбросить» на входящем групповом звонке приглашение только скрывалось у отклонившего; создатель звонка не получал уведомления.
+
+**Решение:** При сбросе приглашённый отправляет на сервер `group_call_reject` с `roomId`. Сервер шлёт создателю комнаты сообщение `group_call_participant_declined` с `userId` отклонившего. На фронте кнопка «Сбросить» вызывает `rejectGroupCallInvite()`: отправка reject, остановка рингтона и сброс состояния. Создатель при получении `group_call_participant_declined` видит тост «X отклонил приглашение в звонок».
+
+**Изменения:** В `presence.js` добавлена обработка `group_call_reject` и отправка `group_call_participant_declined` создателю. В `MessengerApp.js`: в `rejectGroupCallInvite()` добавлена отправка `group_call_reject`, кнопка «Сбросить» ведёт на `rejectGroupCallInvite`, добавлена обработка `group_call_participant_declined` с тостом.
+
+### 5. Третий/четвёртый участник пропадает из списка
+
+**Проблема:** Участники (особенно 3–4-й) пропадали из звонка, хотя соединение могло быть временно в состоянии `disconnected` (переподключение ICE, сетевой сбой).
+
+**Решение:** Удаление участника из списка и закрытие PeerConnection выполнять только при состояниях `failed` или `closed`, а не при `disconnected`. Состояние `disconnected` в WebRTC часто временное, соединение может восстановиться.
+
+**Изменения:** В `establishGroupCallPeer` и `handleGroupCallOffer` в `onconnectionstatechange` условие заменено с `'failed' || 'disconnected'` на `'failed' || 'closed'`.
