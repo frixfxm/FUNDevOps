@@ -62,10 +62,14 @@ export default function MessengerApp() {
   const [incomingOfferSdp, setIncomingOfferSdp] = useState(null);
   const [callingUserId, setCallingUserId] = useState(null);
   const [inCallWithUserId, setInCallWithUserId] = useState(null);
+  const [hasRemoteVideoStream, setHasRemoteVideoStream] = useState(false);
+  const [hasRemoteStream, setHasRemoteStream] = useState(false);
 
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
+  const localVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
+  const remoteVideoRef = useRef(null);
   const remoteStreamRef = useRef(null);
   const ringtoneRef = useRef(null);
   const ringbackRef = useRef(null);
@@ -174,13 +178,31 @@ export default function MessengerApp() {
   }
 
   function attachRemoteStream(stream) {
-    const el = remoteAudioRef.current;
-    if (!el || !stream || stream.getAudioTracks().length === 0) return;
+    if (!stream) return;
     remoteStreamRef.current = stream;
-    el.srcObject = stream;
-    el.muted = false;
-    el.volume = 1;
-    el.play().catch(() => {});
+    const hasVideo = stream.getVideoTracks().length > 0;
+    const hasAudio = stream.getAudioTracks().length > 0;
+    setHasRemoteVideoStream(hasVideo);
+    setHasRemoteStream(true);
+    if (hasVideo && remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = stream;
+      remoteVideoRef.current.muted = false;
+      remoteVideoRef.current.play().catch(() => {});
+    }
+    if (hasAudio && remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = stream;
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current.volume = 1;
+      remoteAudioRef.current.play().catch(() => {});
+    }
+  }
+
+  function attachLocalStreamToVideo(stream) {
+    if (localVideoRef.current && stream) {
+      localVideoRef.current.srcObject = stream;
+      localVideoRef.current.muted = true;
+      localVideoRef.current.play().catch(() => {});
+    }
   }
 
   function stopCallSounds() {
@@ -215,10 +237,18 @@ export default function MessengerApp() {
     if (remoteAudioRef.current) {
       remoteAudioRef.current.srcObject = null;
     }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+    }
     setCallingUserId(null);
     setInCallWithUserId(null);
     setIncomingCallFrom(null);
     setIncomingOfferSdp(null);
+    setHasRemoteVideoStream(false);
+    setHasRemoteStream(false);
   }
 
   async function startCall() {
@@ -229,8 +259,9 @@ export default function MessengerApp() {
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user' } });
       localStreamRef.current = stream;
+      attachLocalStreamToVideo(stream);
       const pc = new RTCPeerConnection({ iceServers: getIceServers() });
       peerConnectionRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -285,8 +316,9 @@ export default function MessengerApp() {
     setIncomingCallFrom(null);
     setIncomingOfferSdp(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user' } });
       localStreamRef.current = stream;
+      attachLocalStreamToVideo(stream);
       const pc = new RTCPeerConnection({ iceServers: getIceServers() });
       peerConnectionRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -805,7 +837,7 @@ export default function MessengerApp() {
             <div style={{ marginBottom: 20 }}>
               <img src={incomingCallFrom.avatarUrl || ''} alt="" width="80" height="80" style={{ borderRadius: '50%', objectFit: 'cover', background: '#334155' }} />
             </div>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Вам звонит {incomingCallFrom.fullName}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Вам видеозвонок от {incomingCallFrom.fullName}</div>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24 }}>
               <button type="button" onClick={acceptCall} className="call-modal-btn call-modal-accept" style={{ padding: '14px 28px', borderRadius: 14, border: 'none', background: '#22c55e', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Взять</button>
               <button type="button" onClick={rejectCall} className="call-modal-btn call-modal-reject" style={{ padding: '14px 28px', borderRadius: 14, border: '1px solid #475569', background: '#334155', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Сбросить</button>
@@ -1011,7 +1043,7 @@ export default function MessengerApp() {
                       type="button"
                       onClick={startCall}
                       className="call-btn call-btn-start"
-                      title="Позвонить"
+                      title="Видеозвонок"
                       style={{ width: 40, height: 40, borderRadius: '50%', border: '1px solid #334155', background: '#0f172a', color: '#22c55e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                     >
                       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
@@ -1024,6 +1056,83 @@ export default function MessengerApp() {
             )}
           </header>
 
+          {(inCallWithUserId || callingUserId) ? (
+            <div
+              className="video-call-view"
+              style={{
+                flex: 1,
+                position: 'relative',
+                background: '#0f172a',
+                minHeight: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  position: 'absolute',
+                  inset: 0
+                }}
+                aria-label="Видео собеседника"
+              />
+              {!hasRemoteStream && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1e293b' }}>
+                  <span style={{ color: '#94a3b8', fontSize: 16 }}>
+                    {callingUserId ? 'Ожидание ответа...' : 'Подключение...'}
+                  </span>
+                </div>
+              )}
+              <video
+                ref={localVideoRef}
+                muted
+                autoPlay
+                playsInline
+                style={{
+                  position: 'absolute',
+                  bottom: 80,
+                  right: 20,
+                  width: 160,
+                  height: 120,
+                  borderRadius: 12,
+                  objectFit: 'cover',
+                  border: '2px solid #334155',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.4)'
+                }}
+                aria-label="Ваше видео"
+              />
+              <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={inCallWithUserId ? endCall : cancelCall}
+                  title={inCallWithUserId ? 'Завершить' : 'Отменить'}
+                  style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: inCallWithUserId ? '#ef4444' : '#64748b',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
           <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 12, background: '#0b1120' }}>
             {error ? <div style={{ color: '#fca5a5' }}>{error}</div> : null}
             {messages.map((item) => {
@@ -1075,6 +1184,8 @@ export default function MessengerApp() {
               Отправить
             </button>
           </form>
+            </>
+          )}
         </section>
       </div>
     </div>
