@@ -117,9 +117,15 @@ export function setupPresenceWebSocket(server) {
             if (ws.readyState === 1) {
               ws.send(JSON.stringify({ type: 'group_call_created', roomId, participantIds }));
             }
-            for (const pid of participantIds) {
-              sendToUser(pid, { type: 'group_call_invite', roomId, fromUserId: userId, isVideo: data.isVideo === true });
-            }
+            const invitePayload = { type: 'group_call_invite', roomId, fromUserId: userId, isVideo: data.isVideo === true };
+            participantIds.forEach((pid, index) => {
+              const delay = index * 80;
+              if (delay === 0) {
+                sendToUser(pid, invitePayload);
+              } else {
+                setTimeout(() => sendToUser(pid, invitePayload), delay);
+              }
+            });
           } else if (data.type === 'group_call_join' && typeof data.roomId === 'string') {
             const room = groupCallRooms.get(data.roomId);
             if (room && !room.joined.has(userId)) {
@@ -128,11 +134,15 @@ export function setupPresenceWebSocket(server) {
               if (ws.readyState === 1) {
                 ws.send(JSON.stringify({ type: 'group_call_room_state', roomId: data.roomId, participants }));
               }
-              for (const uid of room.joined) {
-                if (uid !== userId) {
-                  sendToUser(uid, { type: 'group_call_participant_joined', roomId: data.roomId, userId });
+              const joinedPayload = { type: 'group_call_participant_joined', roomId: data.roomId, userId };
+              const toNotify = Array.from(room.joined).filter((uid) => uid !== userId);
+              toNotify.forEach((uid, index) => {
+                if (index === 0) {
+                  sendToUser(uid, joinedPayload);
+                } else {
+                  setTimeout(() => sendToUser(uid, joinedPayload), index * 50);
                 }
-              }
+              });
             }
           } else if (data.type === 'group_call_leave' && typeof data.roomId === 'string') {
             const room = groupCallRooms.get(data.roomId);

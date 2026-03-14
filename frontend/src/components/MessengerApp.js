@@ -147,6 +147,7 @@ export default function MessengerApp() {
   const groupCallRemoteStreamsRef = useRef(new Map());
   const groupCallRoomIdRef = useRef(null);
   const groupCallRingbackRef = useRef(null);
+  const groupCallOfferQueueRef = useRef(Promise.resolve());
 
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
@@ -392,6 +393,7 @@ export default function MessengerApp() {
     setGroupCallIncomingInvite(null);
     setIsGroupCallCreator(false);
     setHasGroupCallLocalStream(false);
+    groupCallOfferQueueRef.current = Promise.resolve();
   }
 
   function addGroupCallParticipant(userId, info = {}) {
@@ -988,7 +990,11 @@ export default function MessengerApp() {
         }
         if (data.type === 'group_call_offer' && typeof data.roomId === 'string' && typeof data.fromUserId === 'number' && data.sdp) {
           if (data.roomId !== groupCallRoomIdRef.current) return;
-          handleGroupCallOffer(data.fromUserId, data.sdp);
+          const fromUserId = data.fromUserId;
+          const sdp = data.sdp;
+          groupCallOfferQueueRef.current = groupCallOfferQueueRef.current
+            .then(() => handleGroupCallOffer(fromUserId, sdp))
+            .catch(() => {});
         }
         if (data.type === 'group_call_answer' && typeof data.roomId === 'string' && typeof data.fromUserId === 'number' && data.sdp) {
           if (data.roomId !== groupCallRoomIdRef.current) return;
@@ -1592,7 +1598,7 @@ export default function MessengerApp() {
               </div>
               {(() => {
                 const total = 1 + groupCallParticipants.length;
-                const cols = total <= 3 ? total : total <= 4 ? 2 : Math.ceil(Math.sqrt(total));
+                const cols = total === 1 ? 1 : total <= 4 ? 2 : Math.ceil(Math.sqrt(total));
                 const rows = Math.ceil(total / cols);
                 return (
               <div
