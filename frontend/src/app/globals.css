@@ -128,6 +128,14 @@ body {
   flex-shrink: 0;
 }
 
+/* Фон блока сообщений: лёгкий узор */
+.messages-area {
+  background-color: rgba(2, 6, 23, 0.4);
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(51, 65, 85, 0.25) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
 @media (max-width: 768px) {
   .messenger-page {
     padding: 12px;

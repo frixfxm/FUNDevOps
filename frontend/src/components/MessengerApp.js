@@ -16,11 +16,13 @@ function formatTime(dateString) {
 
 const MOBILE_BREAKPOINT = 768;
 
-function getAvatarUrl(url) {
+function getAvatarUrl(url, username) {
+  const base = typeof window !== 'undefined' ? window.location.origin : '';
+  const useLocal = !url || (typeof url === 'string' && url.includes('placehold'));
+  if (useLocal && username) return `${base}/avatar/${username}.jpg`;
   if (!url) return '';
   if (url.startsWith('http')) return url;
-  if (typeof window !== 'undefined') return window.location.origin + url;
-  return url;
+  return base + (url.startsWith('/') ? url : '/' + url);
 }
 
 function getIceServers() {
@@ -39,6 +41,8 @@ export default function MessengerApp() {
   const { addToast } = useToast();
   const inputRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
+  const prevMessagesLengthRef = useRef(0);
   const [token, setToken] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
   const [conversations, setConversations] = useState([]);
@@ -729,8 +733,29 @@ export default function MessengerApp() {
   }, [selectedUserId, messages]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages]);
+    prevMessagesLengthRef.current = 0;
+  }, [selectedUserId]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    const sentByMe = last && last.senderId === currentUser?.id;
+    const prevLen = prevMessagesLengthRef.current;
+    const newIncoming = messages.length > prevLen && !sentByMe;
+    const container = messagesContainerRef.current;
+    const openedChat = prevLen <= 0 && messages.length > 0;
+
+    if (sentByMe || openedChat) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    } else if (newIncoming && container) {
+      const { scrollTop, clientHeight, scrollHeight } = container;
+      const nearBottom = scrollHeight - scrollTop - clientHeight < 120;
+      if (nearBottom) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    }
+    prevMessagesLengthRef.current = messages.length;
+  }, [messages, currentUser?.id]);
 
   useEffect(() => {
     if (!token || conversations.length === 0) return;
@@ -894,7 +919,7 @@ export default function MessengerApp() {
         <div className="incoming-call-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(2,6,23,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={(e) => e.target === e.currentTarget && rejectCall()}>
           <div className="incoming-call-modal" style={{ background: 'rgba(15,23,42,0.95)', borderRadius: 20, padding: 32, border: '1px solid #1e293b', maxWidth: 360, width: '100%', textAlign: 'center', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ marginBottom: 20 }}>
-              <img src={getAvatarUrl(incomingCallFrom.avatarUrl)} alt="" width="80" height="80" style={{ borderRadius: '50%', objectFit: 'cover', background: '#334155' }} />
+              <img src={getAvatarUrl(incomingCallFrom.avatarUrl, incomingCallFrom.username)} alt="" width="80" height="80" style={{ borderRadius: '50%', objectFit: 'cover', background: '#334155' }} onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/80x80?text=?'; }} />
             </div>
             <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
               Вам {incomingCallIsVideo ? 'видеозвонок' : 'звонок'} от {incomingCallFrom.fullName}
@@ -989,7 +1014,7 @@ export default function MessengerApp() {
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <img src={getAvatarUrl(user.avatarUrl)} alt={user.fullName} width="48" height="48" style={{ borderRadius: '999px', objectFit: 'cover', background: '#334155' }} />
+                      <img src={getAvatarUrl(user.avatarUrl, user.username)} alt={user.fullName} width="48" height="48" style={{ borderRadius: '999px', objectFit: 'cover', background: '#334155' }} onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/48x48?text=?'; }} />
                       <div style={{ textAlign: 'left' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span style={{ fontWeight: 700 }}>{user.fullName}</span>
@@ -1048,7 +1073,7 @@ export default function MessengerApp() {
             )}
             {selectedUser ? (
               <>
-                <img src={getAvatarUrl(selectedUser.avatarUrl)} alt={selectedUser.fullName} width="52" height="52" style={{ borderRadius: '999px', objectFit: 'cover', background: '#334155' }} />
+                <img src={getAvatarUrl(selectedUser.avatarUrl, selectedUser.username)} alt={selectedUser.fullName} width="52" height="52" style={{ borderRadius: '999px', objectFit: 'cover', background: '#334155' }} onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/52x52?text=?'; }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 20, fontWeight: 700 }}>{selectedUser.fullName}</span>
@@ -1243,7 +1268,7 @@ export default function MessengerApp() {
             </div>
           ) : (
             <>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 12, background: 'transparent' }}>
+          <div ref={messagesContainerRef} className="messages-area" style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
             {error ? <div style={{ color: '#fca5a5', fontSize: 14 }}>{error}</div> : null}
             {messages.map((item) => {
               const isMine = item.senderId === currentUser.id;
