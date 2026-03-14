@@ -23,7 +23,7 @@ function GroupCallParticipantTile({ participant: p, getAvatarUrl }) {
   return (
     <div
       style={{
-        aspectRatio: '4/3',
+        minHeight: 0,
         borderRadius: 12,
         border: '2px solid #334155',
         overflow: 'hidden',
@@ -49,13 +49,13 @@ function GroupCallParticipantTile({ participant: p, getAvatarUrl }) {
           )}
         </>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', gap: 8 }}>
-          <img src={getAvatarUrl(p.avatarUrl, p.username)} alt="" width="64" height="64" style={{ borderRadius: '50%', objectFit: 'cover', background: '#334155' }} onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/64x64?text=?'; }} />
-          <span style={{ fontSize: 14 }}>{p.fullName}</span>
-          <span style={{ fontSize: 12 }}>Подключение...</span>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', gap: 8, background: '#1e293b' }}>
+          <img src={getAvatarUrl(p.avatarUrl, p.username)} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#334155' }} onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/64x64?text=?'; }} />
+          <span style={{ fontSize: 14, zIndex: 1 }}>{p.fullName}</span>
+          <span style={{ fontSize: 12, zIndex: 1 }}>Подключение...</span>
         </div>
       )}
-      <div style={{ position: 'absolute', bottom: 8, left: 8, right: 8, textAlign: 'center', fontSize: 12, color: '#cbd5e1' }}>{p.fullName}</div>
+      <div style={{ position: 'absolute', bottom: 8, left: 8, right: 8, textAlign: 'center', fontSize: 12, color: '#cbd5e1', zIndex: 1 }}>{p.fullName}</div>
     </div>
   );
 }
@@ -140,6 +140,9 @@ export default function MessengerApp() {
   const [isGroupCallCreator, setIsGroupCallCreator] = useState(false);
   const [showGroupCallModal, setShowGroupCallModal] = useState(false);
   const [groupCallSelectedIds, setGroupCallSelectedIds] = useState([]);
+  const [groupCallSearchQuery, setGroupCallSearchQuery] = useState('');
+  const [groupCallSearchResults, setGroupCallSearchResults] = useState([]);
+  const [hasGroupCallLocalStream, setHasGroupCallLocalStream] = useState(false);
   const groupCallPeersRef = useRef(new Map());
   const groupCallRemoteStreamsRef = useRef(new Map());
   const groupCallRoomIdRef = useRef(null);
@@ -172,6 +175,17 @@ export default function MessengerApp() {
   useEffect(() => {
     groupCallRoomIdRef.current = groupCallRoomId;
   }, [groupCallRoomId]);
+
+  useEffect(() => {
+    if (!groupCallRoomId || !hasGroupCallLocalStream) return;
+    const stream = localStreamRef.current;
+    const el = localVideoRef.current;
+    if (stream && el) {
+      el.srcObject = stream;
+      el.muted = true;
+      el.play().catch(() => {});
+    }
+  }, [groupCallRoomId, hasGroupCallLocalStream]);
 
   useEffect(() => {
     return () => {
@@ -377,6 +391,7 @@ export default function MessengerApp() {
     setGroupCallParticipants([]);
     setGroupCallIncomingInvite(null);
     setIsGroupCallCreator(false);
+    setHasGroupCallLocalStream(false);
   }
 
   function addGroupCallParticipant(userId, info = {}) {
@@ -422,6 +437,7 @@ export default function MessengerApp() {
       );
       localStreamRef.current = stream;
       setLocalVideoEnabled(isVideo);
+      setHasGroupCallLocalStream(true);
       if (isVideo) attachLocalStreamToVideo(stream);
       wsRef.current.send(JSON.stringify({ type: 'group_call_create', participantIds: ids, isVideo }));
       setShowGroupCallModal(false);
@@ -446,6 +462,7 @@ export default function MessengerApp() {
       );
       localStreamRef.current = stream;
       setLocalVideoEnabled(isVideo);
+      setHasGroupCallLocalStream(true);
       if (isVideo) attachLocalStreamToVideo(stream);
       if (groupCallRingbackRef.current) {
         groupCallRingbackRef.current.pause();
@@ -769,6 +786,31 @@ export default function MessengerApp() {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, [token, searchQuery]);
+
+  const groupCallSearchDebounceRef = useRef(null);
+  useEffect(() => {
+    if (!token || !showGroupCallModal) return;
+    if (!groupCallSearchQuery.trim()) {
+      setGroupCallSearchResults([]);
+      return;
+    }
+    const q = groupCallSearchQuery.trim();
+    if (groupCallSearchDebounceRef.current) clearTimeout(groupCallSearchDebounceRef.current);
+    groupCallSearchDebounceRef.current = setTimeout(async () => {
+      try {
+        const data = await apiRequest(`/chat/users/search?q=${encodeURIComponent(q)}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setGroupCallSearchResults(data);
+      } catch {
+        setGroupCallSearchResults([]);
+      }
+      groupCallSearchDebounceRef.current = null;
+    }, 300);
+    return () => {
+      if (groupCallSearchDebounceRef.current) clearTimeout(groupCallSearchDebounceRef.current);
+    };
+  }, [token, showGroupCallModal, groupCallSearchQuery]);
 
   const wsClosedByUsRef = useRef(false);
   const wsReconnectAttemptsRef = useRef(0);
@@ -1259,18 +1301,41 @@ export default function MessengerApp() {
         <div
           className="incoming-call-overlay"
           style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(2,6,23,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-          onClick={(e) => e.target === e.currentTarget && setShowGroupCallModal(false)}
+          onClick={(e) => e.target === e.currentTarget && (setShowGroupCallModal(false), setGroupCallSearchQuery(''), setGroupCallSearchResults([]))}
         >
           <div
             style={{ background: 'rgba(15,23,42,0.95)', borderRadius: 20, padding: 24, border: '1px solid #1e293b', maxWidth: 400, width: '100%', maxHeight: '80vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Групповой звонок</div>
-            <div style={{ flex: 1, overflowY: 'auto', marginBottom: 16 }}>
-              {sidebarList.length === 0 ? (
-                <div style={{ color: '#64748b', fontSize: 14 }}>Нет контактов для выбора</div>
-              ) : (
-                sidebarList.map((user) => {
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>Групповой звонок</div>
+            <input
+              type="text"
+              value={groupCallSearchQuery}
+              onChange={(e) => setGroupCallSearchQuery(e.target.value)}
+              placeholder="Поиск по имени или логину..."
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                borderRadius: 12,
+                border: '1px solid #334155',
+                background: '#020617',
+                color: '#fff',
+                fontSize: 14,
+                outline: 'none',
+                marginBottom: 12
+              }}
+            />
+            <div style={{ flex: 1, overflowY: 'auto', marginBottom: 16, minHeight: 120 }}>
+              {(() => {
+                const list = groupCallSearchQuery.trim() ? groupCallSearchResults : conversations;
+                if (list.length === 0) {
+                  return (
+                    <div style={{ color: '#64748b', fontSize: 14 }}>
+                      {groupCallSearchQuery.trim() ? 'Никого не найдено' : 'Нет контактов. Введите запрос в поиск.'}
+                    </div>
+                  );
+                }
+                return list.map((user) => {
                   const checked = groupCallSelectedIds.includes(user.id);
                   const online = isUserOnline(user.id);
                   return (
@@ -1304,11 +1369,11 @@ export default function MessengerApp() {
                       </div>
                     </label>
                   );
-                })
-              )}
+                });
+              })()}
             </div>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => { setShowGroupCallModal(false); setGroupCallSelectedIds([]); }} style={{ padding: '10px 20px', borderRadius: 14, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 14 }}>Отмена</button>
+              <button type="button" onClick={() => { setShowGroupCallModal(false); setGroupCallSelectedIds([]); setGroupCallSearchQuery(''); setGroupCallSearchResults([]); }} style={{ padding: '10px 20px', borderRadius: 14, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 14 }}>Отмена</button>
               <button type="button" onClick={() => createGroupCall(groupCallSelectedIds, true)} disabled={groupCallSelectedIds.length === 0} style={{ padding: '10px 20px', borderRadius: 14, border: 'none', background: groupCallSelectedIds.length === 0 ? '#334155' : '#2563eb', color: '#fff', cursor: groupCallSelectedIds.length === 0 ? 'default' : 'pointer', fontSize: 14, fontWeight: 600 }}>Начать звонок</button>
             </div>
           </div>
@@ -1525,21 +1590,26 @@ export default function MessengerApp() {
                   Завершить
                 </button>
               </div>
+              {(() => {
+                const total = 1 + groupCallParticipants.length;
+                const cols = total <= 3 ? total : total <= 4 ? 2 : Math.ceil(Math.sqrt(total));
+                const rows = Math.ceil(total / cols);
+                return (
               <div
                 style={{
                   flex: 1,
+                  minHeight: 0,
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                  gridTemplateColumns: `repeat(${cols}, 1fr)`,
+                  gridTemplateRows: `repeat(${rows}, 1fr)`,
                   gap: 12,
-                  padding: 16,
-                  overflow: 'auto',
-                  alignContent: 'start'
+                  padding: 16
                 }}
               >
                 <div
                   style={{
                     position: 'relative',
-                    aspectRatio: '4/3',
+                    minHeight: 0,
                     borderRadius: 12,
                     border: '2px solid #334155',
                     overflow: 'hidden',
@@ -1550,7 +1620,7 @@ export default function MessengerApp() {
                     justifyContent: 'center'
                   }}
                 >
-                  {localVideoEnabled && localStreamRef.current ? (
+                  {localVideoEnabled ? (
                     <video
                       ref={localVideoRef}
                       muted
@@ -1571,6 +1641,8 @@ export default function MessengerApp() {
                   <GroupCallParticipantTile key={p.userId} participant={p} getAvatarUrl={getAvatarUrl} />
                 ))}
               </div>
+                );
+              })()}
               <div style={{ padding: 16, display: 'flex', gap: 12, justifyContent: 'center', borderTop: '1px solid #1e293b' }}>
                 <button
                   type="button"
