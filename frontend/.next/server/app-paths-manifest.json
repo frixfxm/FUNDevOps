@@ -1,0 +1,6 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/login/page": "app/login/page.js",
+  "/messenger/page": "app/messenger/page.js",
+  "/manifest.webmanifest/route": "app/manifest.webmanifest/route.js"
+}

@@ -23,13 +23,13 @@ CREATE TABLE messages (
 
 INSERT INTO users (full_name, username, password_hash, avatar_url)
 VALUES
-  ('Люба', 'luba', crypt('May122004!', gen_salt('bf')), 'https://placehold.co/64x64?text=L'),
-  ('Петр Петрович', 'peta', crypt('petaOWN', gen_salt('bf')), 'https://placehold.co/64x64?text=P'),
-  ('Толя', 'tolya', crypt('Tolik0508', gen_salt('bf')), 'https://placehold.co/64x64?text=T'),
-  ('Хомяк', 'dima', crypt('DIMASIK1213', gen_salt('bf')), 'https://placehold.co/64x64?text=H'),
-  ('Влад', 'vlad', crypt('vladLadaSedan', gen_salt('bf')), 'https://placehold.co/64x64?text=V'),
-  ('Санечка', 'sasha', crypt('sanechkaPASS', gen_salt('bf')), 'https://placehold.co/64x64?text=S'),
-  ('МАКСОН', 'max', crypt('MaxonChinazes', gen_salt('bf')), 'https://placehold.co/64x64?text=M');
+  ('Люба', 'luba', crypt('May122004!', gen_salt('bf')), '/avatar/luba.jpg'),
+  ('Петр Петрович', 'peta', crypt('petaOWN', gen_salt('bf')), '/avatar/peta.jpg'),
+  ('Толя', 'tolya', crypt('Tolik0508', gen_salt('bf')), '/avatar/tolya.jpg'),
+  ('Хомяк', 'dima', crypt('DIMASIK1213', gen_salt('bf')), '/avatar/homyak.jpg'),
+  ('Влад', 'vlad', crypt('vladLadaSedan', gen_salt('bf')), '/avatar/vlad.jpg'),
+  ('Санечка', 'sasha', crypt('sanechkaPASS', gen_salt('bf')), '/avatar/sasha.jpg'),
+  ('МАКСОН', 'max', crypt('MaxonChinazes', gen_salt('bf')), '/avatar/max.jpg');
 
 INSERT INTO messages (sender_id, receiver_id, body)
 VALUES

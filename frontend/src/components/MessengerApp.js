@@ -114,6 +114,14 @@ export default function MessengerApp() {
     }
   }, [inCallWithUserId, callingUserId, isVideoCall]);
 
+  useEffect(() => {
+    if (!isVideoCall || !localVideoEnabled) return;
+    if (!(inCallWithUserId || callingUserId)) return;
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    attachLocalStreamToVideo(stream);
+  }, [localVideoEnabled, isVideoCall, inCallWithUserId, callingUserId]);
+
   const isUserOnline = useCallback((userId) => onlineUserIds.has(userId), [onlineUserIds]);
 
   const [selectedUserFromSearch, setSelectedUserFromSearch] = useState(null);
@@ -407,6 +415,7 @@ export default function MessengerApp() {
     const next = !localVideoEnabled;
     videoTracks.forEach((t) => { t.enabled = next; });
     setLocalVideoEnabled(next);
+    if (next) attachLocalStreamToVideo(stream);
   }
 
   function playNewMessageSound() {
@@ -1132,9 +1141,10 @@ export default function MessengerApp() {
                 style={{
                   width: '100%',
                   height: '100%',
-                  objectFit: 'cover',
+                  objectFit: 'contain',
                   position: 'absolute',
-                  inset: 0
+                  inset: 0,
+                  background: '#020617'
                 }}
                 aria-label="Видео собеседника"
               />
