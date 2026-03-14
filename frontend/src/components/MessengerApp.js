@@ -16,6 +16,13 @@ function formatTime(dateString) {
 
 const MOBILE_BREAKPOINT = 768;
 
+function getAvatarUrl(url) {
+  if (!url) return '';
+  if (url.startsWith('http')) return url;
+  if (typeof window !== 'undefined') return window.location.origin + url;
+  return url;
+}
+
 function getIceServers() {
   const servers = [{ urls: 'stun:stun.l.google.com:19302' }];
   const turnUrl = process.env.NEXT_PUBLIC_TURN_SERVER;
@@ -874,27 +881,27 @@ export default function MessengerApp() {
   return (
     <div className="messenger-page">
       {showMicBanner && (
-        <div className="mic-banner" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 40, padding: '12px 20px', background: '#1e293b', borderBottom: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-          <span style={{ fontSize: 14, color: '#e2e8f0' }}>Для звонков нужен доступ к микрофону</span>
+        <div className="mic-banner" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 40, padding: '12px 20px', background: 'rgba(15,23,42,0.95)', backdropFilter: 'blur(10px)', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <span style={{ fontSize: 14, color: '#cbd5e1' }}>Для звонков нужен доступ к микрофону</span>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" onClick={requestMicPermission} style={{ padding: '8px 16px', borderRadius: 10, border: 'none', background: '#22c55e', color: '#fff', cursor: 'pointer', fontSize: 14 }}>Разрешить</button>
-            <button type="button" onClick={() => { setShowMicBanner(false); sessionStorage.setItem('messenger_mic_permission_asked', '1'); }} style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 14 }}>Позже</button>
+            <button type="button" onClick={requestMicPermission} style={{ padding: '8px 16px', borderRadius: 14, border: 'none', background: '#2563eb', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>Разрешить</button>
+            <button type="button" onClick={() => { setShowMicBanner(false); sessionStorage.setItem('messenger_mic_permission_asked', '1'); }} style={{ padding: '8px 16px', borderRadius: 14, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 14 }}>Позже</button>
           </div>
         </div>
       )}
 
       {incomingCallFrom && (
-        <div className="incoming-call-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={(e) => e.target === e.currentTarget && rejectCall()}>
-          <div className="incoming-call-modal" style={{ background: '#111827', borderRadius: 20, padding: 32, border: '1px solid #334155', maxWidth: 360, width: '100%', textAlign: 'center', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }} onClick={(e) => e.stopPropagation()}>
+        <div className="incoming-call-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(2,6,23,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={(e) => e.target === e.currentTarget && rejectCall()}>
+          <div className="incoming-call-modal" style={{ background: 'rgba(15,23,42,0.95)', borderRadius: 20, padding: 32, border: '1px solid #1e293b', maxWidth: 360, width: '100%', textAlign: 'center', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ marginBottom: 20 }}>
-              <img src={incomingCallFrom.avatarUrl || ''} alt="" width="80" height="80" style={{ borderRadius: '50%', objectFit: 'cover', background: '#334155' }} />
+              <img src={getAvatarUrl(incomingCallFrom.avatarUrl)} alt="" width="80" height="80" style={{ borderRadius: '50%', objectFit: 'cover', background: '#334155' }} />
             </div>
             <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>
               Вам {incomingCallIsVideo ? 'видеозвонок' : 'звонок'} от {incomingCallFrom.fullName}
             </div>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24 }}>
-              <button type="button" onClick={acceptCall} className="call-modal-btn call-modal-accept" style={{ padding: '14px 28px', borderRadius: 14, border: 'none', background: '#22c55e', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Взять</button>
-              <button type="button" onClick={rejectCall} className="call-modal-btn call-modal-reject" style={{ padding: '14px 28px', borderRadius: 14, border: '1px solid #475569', background: '#334155', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Сбросить</button>
+              <button type="button" onClick={acceptCall} className="call-modal-btn call-modal-accept" style={{ padding: '14px 28px', borderRadius: 14, border: '1px solid #16a34a', background: '#22c55e', color: '#fff', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Взять</button>
+              <button type="button" onClick={rejectCall} className="call-modal-btn call-modal-reject" style={{ padding: '14px 28px', borderRadius: 14, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 16, fontWeight: 600 }}>Сбросить</button>
             </div>
           </div>
         </div>
@@ -911,19 +918,19 @@ export default function MessengerApp() {
       <div className={gridClass} style={{ marginTop: showMicBanner ? 52 : 0 }}>
         <aside className="messenger-sidebar">
           <div style={{ padding: 20, borderBottom: '1px solid #1e293b' }}>
-            <div style={{ fontSize: 14, color: '#94a3b8' }}>Вы вошли как</div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{currentUser.fullName}</div>
-            <div style={{ fontSize: 14, color: '#94a3b8', marginTop: 6 }}>@{currentUser.username}</div>
+            <div style={{ fontSize: 13, color: '#94a3b8' }}>Вы вошли как</div>
+            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 0.2, marginTop: 4 }}>{currentUser.fullName}</div>
+            <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>@{currentUser.username}</div>
             <button
               type="button"
               onClick={logout}
-              style={{ marginTop: 16, width: '100%', padding: 12, borderRadius: 12, border: '1px solid #334155', background: '#0f172a', color: '#fff', cursor: 'pointer' }}
+              style={{ marginTop: 16, width: '100%', padding: 12, borderRadius: 14, border: '1px solid #334155', background: '#020617', color: '#cbd5e1', cursor: 'pointer', fontSize: 14 }}
             >
               Выйти
             </button>
           </div>
 
-          <div style={{ padding: '12px 20px', borderBottom: '1px solid #1e293b' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #1e293b' }}>
             <input
               type="text"
               value={searchQuery}
@@ -932,11 +939,12 @@ export default function MessengerApp() {
               style={{
                 width: '100%',
                 padding: '12px 14px',
-                borderRadius: 12,
+                borderRadius: 14,
                 border: '1px solid #334155',
-                background: '#0f172a',
+                background: '#020617',
                 color: '#fff',
-                fontSize: 14
+                fontSize: 14,
+                outline: 'none'
               }}
             />
           </div>
@@ -971,17 +979,17 @@ export default function MessengerApp() {
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       gap: 12,
-                      marginBottom: 10,
-                      borderRadius: 16,
-                      border: active ? '1px solid #3b82f6' : '1px solid #1e293b',
-                      background: active ? '#0f172a' : 'transparent',
-                      color: '#fff',
+                      marginBottom: 8,
+                      borderRadius: 14,
+                      border: active ? '1px solid #2563eb' : '1px solid #1e293b',
+                      background: active ? 'rgba(37,99,235,0.15)' : 'transparent',
+                      color: '#e2e8f0',
                       padding: 12,
                       cursor: 'pointer'
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <img src={user.avatarUrl} alt={user.fullName} width="48" height="48" style={{ borderRadius: '999px', objectFit: 'cover', background: '#334155' }} />
+                      <img src={getAvatarUrl(user.avatarUrl)} alt={user.fullName} width="48" height="48" style={{ borderRadius: '999px', objectFit: 'cover', background: '#334155' }} />
                       <div style={{ textAlign: 'left' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span style={{ fontWeight: 700 }}>{user.fullName}</span>
@@ -1028,19 +1036,19 @@ export default function MessengerApp() {
         </aside>
 
         <section className="messenger-chat">
-          <header className="messenger-chat-header" style={{ padding: 20, borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <header className="messenger-chat-header" style={{ padding: 16, borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 12 }}>
             {isMobile && (
               <button
                 type="button"
                 onClick={() => setMobileShowChat(false)}
-                style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid #334155', background: '#0f172a', color: '#fff', cursor: 'pointer' }}
+                style={{ padding: '8px 12px', borderRadius: 14, border: '1px solid #334155', background: '#020617', color: '#cbd5e1', cursor: 'pointer', fontSize: 14 }}
               >
                 ← Назад
               </button>
             )}
             {selectedUser ? (
               <>
-                <img src={selectedUser.avatarUrl} alt={selectedUser.fullName} width="52" height="52" style={{ borderRadius: '999px' }} />
+                <img src={getAvatarUrl(selectedUser.avatarUrl)} alt={selectedUser.fullName} width="52" height="52" style={{ borderRadius: '999px', objectFit: 'cover', background: '#334155' }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 20, fontWeight: 700 }}>{selectedUser.fullName}</span>
@@ -1099,7 +1107,7 @@ export default function MessengerApp() {
                         onClick={() => startCall(true)}
                         className="call-btn call-btn-video"
                         title="Видеозвонок"
-                        style={{ width: 40, height: 40, borderRadius: '50%', border: '1px solid #334155', background: '#0f172a', color: '#22c55e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        style={{ width: 40, height: 40, borderRadius: '50%', border: '1px solid #334155', background: '#020617', color: '#22c55e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>
                       </button>
@@ -1108,7 +1116,7 @@ export default function MessengerApp() {
                         onClick={() => startCall(false)}
                         className="call-btn call-btn-audio"
                         title="Аудиозвонок"
-                        style={{ width: 40, height: 40, borderRadius: '50%', border: '1px solid #334155', background: '#0f172a', color: '#22c55e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        style={{ width: 40, height: 40, borderRadius: '50%', border: '1px solid #334155', background: '#020617', color: '#3b82f6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
                       </button>
@@ -1127,7 +1135,7 @@ export default function MessengerApp() {
               style={{
                 flex: 1,
                 position: 'relative',
-                background: '#0f172a',
+                background: 'radial-gradient(ellipse at 50% 50%, rgba(15,23,42,0.95), #020617)',
                 minHeight: 0,
                 display: 'flex',
                 alignItems: 'center',
@@ -1235,8 +1243,8 @@ export default function MessengerApp() {
             </div>
           ) : (
             <>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 12, background: '#0b1120' }}>
-            {error ? <div style={{ color: '#fca5a5' }}>{error}</div> : null}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 12, background: 'transparent' }}>
+            {error ? <div style={{ color: '#fca5a5', fontSize: 14 }}>{error}</div> : null}
             {messages.map((item) => {
               const isMine = item.senderId === currentUser.id;
               return (
@@ -1244,22 +1252,23 @@ export default function MessengerApp() {
                   key={item.id}
                   style={{
                     alignSelf: isMine ? 'flex-end' : 'flex-start',
-                    maxWidth: '70%',
-                    background: isMine ? '#2563eb' : '#1e293b',
+                    maxWidth: '75%',
+                    background: isMine ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' : 'rgba(30,41,59,0.8)',
                     color: '#fff',
                     borderRadius: 16,
-                    padding: '12px 14px'
+                    padding: '12px 16px',
+                    border: isMine ? 'none' : '1px solid #334155'
                   }}
                 >
                   <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{item.body}</div>
-                  <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>{formatTime(item.createdAt)}</div>
+                  <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>{formatTime(item.createdAt)}</div>
                 </div>
               );
             })}
             <div ref={messagesEndRef} style={{ height: 0 }} aria-hidden />
           </div>
 
-          <form onSubmit={sendMessage} style={{ padding: 20, borderTop: '1px solid #1e293b', display: 'flex', gap: 12 }}>
+          <form onSubmit={sendMessage} style={{ padding: 16, borderTop: '1px solid #1e293b', display: 'flex', gap: 12 }}>
             <input
               ref={inputRef}
               value={message}
@@ -1276,12 +1285,13 @@ export default function MessengerApp() {
                 borderRadius: 14,
                 border: '1px solid #334155',
                 background: '#020617',
-                color: '#fff'
+                color: '#fff',
+                outline: 'none'
               }}
             />
             <button
               type="submit"
-              style={{ padding: '0 22px', borderRadius: 14, border: 'none', background: '#22c55e', color: '#fff', cursor: 'pointer' }}
+              style={{ padding: '0 22px', borderRadius: 14, border: '1px solid #1d4ed8', background: '#2563eb', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
             >
               Отправить
             </button>
